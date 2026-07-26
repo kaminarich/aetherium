@@ -301,21 +301,21 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════
-# STEP 8: Prepare Build Environment (version-specific)
+# STEP 8: Prepare Build Environment
 # ═══════════════════════════════════════════════════════════
-if [ "$KERNEL_VERSION" = "android14-6.1" ]; then
-    info "Preparing android14-6.1 (Kleaf/Bazel) build environment..."
+# ── Normalize defconfig for strict consistency check ──
+# Both Bazel (6.1) and build.sh (5.10) run savedefconfig and compare.
+info "Normalizing defconfig (savedefconfig)..."
+cd common
+make ARCH=arm64 O=../out_defconfig_tmp gki_defconfig 2>&1 | tail -3
+make ARCH=arm64 O=../out_defconfig_tmp savedefconfig 2>&1 | tail -3
+cp ../out_defconfig_tmp/defconfig arch/arm64/configs/gki_defconfig
+rm -rf ../out_defconfig_tmp
+cd ..
+log "Defconfig normalized"
 
-    # ── Normalize defconfig for Bazel's strict consistency check ──
-    # Bazel runs savedefconfig and compares. We must match that output.
-    info "Normalizing defconfig (savedefconfig)..."
-    cd common
-    make ARCH=arm64 O=../out_defconfig_tmp gki_defconfig 2>&1 | tail -3
-    make ARCH=arm64 O=../out_defconfig_tmp savedefconfig 2>&1 | tail -3
-    cp ../out_defconfig_tmp/defconfig arch/arm64/configs/gki_defconfig
-    rm -rf ../out_defconfig_tmp
-    cd ..
-    log "Defconfig normalized"
+if [ "$KERNEL_VERSION" = "android14-6.1" ]; then
+    info "Preparing android14-6.1 (Kleaf/Bazel) specific patches..."
 
     # ── Remove protected exports checks ──
     # GKI 6.1 enforces protected symbol export lists. KernelSU adds
@@ -327,8 +327,7 @@ if [ "$KERNEL_VERSION" = "android14-6.1" ]; then
     rm -f common/android/abi_gki_protected_exports_* 2>/dev/null || true
 
 elif [ "$KERNEL_VERSION" = "android12-5.10" ]; then
-    info "Preparing android12-5.10 (build.sh) build environment..."
-    # No special prep needed for 5.10, build.sh handles everything
+    info "Preparing android12-5.10 (build.sh) specific patches..."
 fi
 
 # ═══════════════════════════════════════════════════════════
@@ -337,128 +336,74 @@ fi
 DIST_DIR="$(pwd)/dist"
 mkdir -p "$DIST_DIR"
 
-if [ "$KERNEL_VERSION" = "android14-6.1" ]; then
-    # ── Kleaf / Bazel build ──
-    info "Building kernel with Kleaf/Bazel (LTO=$LTO)..."
-    info "Using --config=fast --nokmi_symbol_list_strict_mode to bypass GKI ABI checks"
-
-    LTO="$LTO" tools/bazel run \
-        --config=fast \
-        --nokmi_symbol_list_strict_mode \
-        //common:kernel_aarch64_dist \
-        -- --dist_dir="$DIST_DIR"
-
-elif [ "$KERNEL_VERSION" = "android12-5.10" ]; then
-    # ── Legacy build.sh ──
-    info "Building kernel with build.sh (LTO=$LTO)..."
-
-    # Disable KMI/ABI strict checks & defconfig formatting checks
-    export KMI_SYMBOL_LIST_STRICT_MODE=0
-    export TRIM_NONLISTED_KMI=0
-    export SKIP_DEFCONFIG_CHECK=1
-
-    DIST_DIR="$DIST_DIR" \
-    LTO="$LTO" \
-    BUILD_CONFIG=common/build.config.gki.aarch64 \
-    build/build.sh
+if [ "$SOURCE_TYPE" = "clone" ]; then
+    info "Building standalone kernel from cloned source..."
+    TOOLCHAIN_DIR="$(pwd)/toolchain"
+    
+    if [ ! -d "$TOOLCHAIN_DIR" ]; then
+        info "Downloading Clang toolchain..."
+        if [ "$KERNEL_VERSION" = "android12-5.10" ]; then
+            # Official Android 12 GKI Clang
+            git clone --depth=1 https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git "$TOOLCHAIN_DIR"
+        else
+            # Official Android 14 GKI Clang
+            git clone --depth=1 https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r536225.git "$TOOLCHAIN_DIR"
+        fi
+    fi
+    
+    export PATH="$TOOLCHAIN_DIR/bin:$PATH"
+    export ARCH=arm64
+    export LLVM=1
+    export LLVM_IAS=1
+    export CROSS_COMPILE=aarch64-linux-gnu-
+    
+    cd common
+    info "Configuring defconfig..."
+    make O=../out gki_defconfig
+    
+    if [ "$LTO" = "thin" ]; then
+        info "Applying LTO=thin configuration..."
+        scripts/config --file ../out/.config -e LTO_CLANG -e LTO_CLANG_THIN -d LTO_NONE -d LTO_CLANG_FULL
+        make O=../out olddefconfig
+    fi
+    
+    info "Compiling Kernel (Image)..."
+    make O=../out -j"$(nproc --all)" Image
+    cd ..
+    
+    cp out/arch/arm64/boot/Image* "$DIST_DIR/"
+    
+else
+    if [ "$KERNEL_VERSION" = "android14-6.1" ]; then
+        # ── Kleaf / Bazel build ──
+        info "Building kernel with Kleaf/Bazel (LTO=$LTO)..."
+        info "Using --config=fast --nokmi_symbol_list_strict_mode to bypass GKI ABI checks"
+    
+        LTO="$LTO" tools/bazel run \
+            --config=fast \
+            --nokmi_symbol_list_strict_mode \
+            //common:kernel_aarch64_dist \
+            -- --dist_dir="$DIST_DIR"
+    
+    elif [ "$KERNEL_VERSION" = "android12-5.10" ]; then
+        # ── Legacy build.sh ──
+        info "Building kernel with build.sh (LTO=$LTO)..."
+    
+        # Disable KMI/ABI strict checks & defconfig formatting checks
+        export KMI_SYMBOL_LIST_STRICT_MODE=0
+        export TRIM_NONLISTED_KMI=0
+        export SKIP_DEFCONFIG_CHECK=1
+    
+        DIST_DIR="$DIST_DIR" \
+        LTO="$LTO" \
+        BUILD_CONFIG=common/build.config.gki.aarch64 \
+        build/build.sh
+    fi
 fi
 
 log "Kernel build completed"
 echo "── Build output ──"
 ls -la "$DIST_DIR/" || true
-
-# ═══════════════════════════════════════════════════════════
-# STEP 10: Package with AnyKernel3
-# ═══════════════════════════════════════════════════════════
-info "Packaging with AnyKernel3..."
-
-ANYKERNEL_DIR="$(pwd)/AnyKernel3-out"
-rm -rf "$ANYKERNEL_DIR"
-git clone https://github.com/osm0sis/AnyKernel3 --depth=1 "$ANYKERNEL_DIR"
-rm -rf "$ANYKERNEL_DIR/.git" "$ANYKERNEL_DIR/.github"
-
-# Write AnyKernel3 config for GKI
-cat > "$ANYKERNEL_DIR/anykernel.sh" << AKEOF
-# AnyKernel3 Ramdisk Mod Script
-# osm0sis @ xda-developers
-
-## AnyKernel setup
-properties() { '
-kernel.string=${KERNEL_NAME} Kernel by @kaminarich
-do.devicecheck=0
-do.modules=0
-do.systemless=1
-do.cleanup=1
-do.cleanuponabort=0
-device.name1=
-supported.versions=
-supported.patchlevels=
-'; }
-
-### AnyKernel install
-
-# boot shell variables
-BLOCK=boot;
-IS_SLOT_DEVICE=auto;
-RAMDISK_COMPRESSION=auto;
-PATCH_VBMETA_FLAG=auto;
-NO_BLOCK_DISPLAY=1;
-NO_MAGISK_CHECK=1;
-
-# import functions/variables and setup patching - see for reference (DO NOT REMOVE)
-. tools/ak3-core.sh;
-
-# variables
-supported=false
-# Loop to check if the current kernel version is in the supported_kvers list
-supported_kvers='5.10 6.1 6.6'
-
-# check current kernel version
-kernel_version=\$(cat /proc/version | awk -F '-' '{print \$1}' | awk '{print \$3}' | cut -f1-2 -d'.')
-
-for ver in \$supported_kvers; do
-  if [ "\$kernel_version" == "\$ver" ]; then
-    supported=true
-    break
-  fi
-done
-
-if ! \$supported; then
-  abort "- Unsupported kernel version: \$kernel_version, abort."
-fi
-
-# boot install
-split_boot
-if [ -f "split_img/ramdisk.cpio" ]; then
-    unpack_ramdisk
-    write_boot
-else
-    flash_boot
-fi
-## end boot install
-AKEOF
-
-# Copy kernel images (GKI uses Image or Image.lz4)
-for img in Image Image.lz4; do
-    if [ -f "$DIST_DIR/$img" ]; then
-        cp "$DIST_DIR/$img" "$ANYKERNEL_DIR/"
-        log "Copied $img"
-    fi
-done
-
-# Generate build name
-KSU_TAG=""
-if [ "$ENABLE_KSU" = "true" ]; then
-    KSU_TAG="-KSU-Next"
-fi
-BUILD_NAME="${KERNEL_NAME}-${UPSTREAM_BRANCH}${KSU_TAG}"
-DATE_TAG=$(date +%Y%m%d)
-ZIP_NAME="${BUILD_NAME}-${DATE_TAG}-AnyKernel3.zip"
-
-# Create flashable zip
-cd "$ANYKERNEL_DIR"
-zip -r9 "${WORKDIR}/${ZIP_NAME}" . -x '*.git*' -x 'README.md' -x 'LICENSE'
-cd "$WORKDIR"
 
 # ═══════════════════════════════════════════════════════════
 # Done!
@@ -468,17 +413,11 @@ echo -e "${BOLD}╔════════════════════�
 echo -e "${BOLD}║        ${GREEN}Build Complete!${NC}${BOLD}               ║${NC}"
 echo -e "${BOLD}╚══════════════════════════════════════╝${NC}"
 echo ""
-echo -e "  ${BOLD}Kernel :${NC} ${DIST_DIR}/Image*"
-echo -e "  ${BOLD}Flashable:${NC} ${WORKDIR}/${ZIP_NAME}"
+echo -e "  ${BOLD}Kernel Images located at:${NC}"
+echo -e "  ${YELLOW}${DIST_DIR}/${NC}"
 echo ""
-echo -e "${YELLOW}╔══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${YELLOW}║  ⚠  FIRST BOOT WARNING                                 ║${NC}"
-echo -e "${YELLOW}║  After flashing, the first boot may hang/stall for     ║${NC}"
-echo -e "${YELLOW}║  1-3 minutes due to SELinux policy recompilation and   ║${NC}"
-echo -e "${YELLOW}║  Android Verified Boot (AVB) re-verification.          ║${NC}"
-echo -e "${YELLOW}║                                                        ║${NC}"
-echo -e "${YELLOW}║  If it stalls: force reboot (hold power 10s).          ║${NC}"
-echo -e "${YELLOW}║  The second boot will complete normally.               ║${NC}"
-echo -e "${YELLOW}╚══════════════════════════════════════════════════════════╝${NC}"
+ls -lh "$DIST_DIR/" | grep -E "Image|vmlinux" || true
 echo ""
-log "Done! Flash the zip via TWRP/OrangeFox or adb sideload."
+
+echo ""
+log "Done! Flash the Image via KernelSU or fastboot."
