@@ -134,7 +134,7 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Fetching upstream tag: $UPSTREAM_TAG"
-          git fetch google "refs/tags/${UPSTREAM_TAG}:refs/tags/${UPSTREAM_TAG}" --depth=1 || {
+          git fetch google "refs/tags/${UPSTREAM_TAG}:refs/tags/${UPSTREAM_TAG}" || {
             echo "::error::Failed to fetch tag $UPSTREAM_TAG from Google. Check if tag exists."
             echo "Available recent tags:"
             git ls-remote --tags google | grep "android14-6.1-2026" | head -20
