@@ -355,20 +355,51 @@ jobs:
           supported.patchlevels=
           '; }
 
-          # shell variables
-          block=boot;
-          is_slot_device=auto;
-          ramdisk_compression=auto;
-          patch_vbmeta_flag=auto;
+          ### AnyKernel install
 
+          # boot shell variables
+          BLOCK=boot;
+          IS_SLOT_DEVICE=auto;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+          NO_BLOCK_DISPLAY=1;
+          NO_MAGISK_CHECK=1;
+
+          # import functions/variables and setup patching - see for reference (DO NOT REMOVE)
           . tools/ak3-core.sh;
 
-          split_boot;
-          flash_boot;
+          # variables
+          supported=false
+          # Loop to check if the current kernel version is in the supported_kvers list
+          supported_kvers='5.10 6.1 6.6'
+
+          # check current kernel version
+          kernel_version=$(cat /proc/version | awk -F '-' '{print $1}' | awk '{print $3}' | cut -f1-2 -d'.')
+
+          for ver in $supported_kvers; do
+            if [ "$kernel_version" == "$ver" ]; then
+              supported=true
+              break
+            fi
+          done
+
+          if ! $supported; then
+            abort "- Unsupported kernel version: $kernel_version, abort."
+          fi
+
+          # boot install
+          split_boot
+          if [ -f "split_img/ramdisk.cpio" ]; then
+              unpack_ramdisk
+              write_boot
+          else
+              flash_boot
+          fi
+          ## end boot install
           AKEOF
 
           # Copy all kernel images
-          for img in Image Image.lz4 Image.gz; do
+          for img in Image Image.lz4; do
             if [ -f "$GITHUB_WORKSPACE/dist/$img" ]; then
               cp "$GITHUB_WORKSPACE/dist/$img" AnyKernel3-tmp/
               echo "✓ Copied $img"
