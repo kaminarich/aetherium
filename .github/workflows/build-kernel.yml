@@ -42,6 +42,25 @@ on:
           - "full"
           - "none"
         default: "thin"
+        
+      SOURCE_TYPE:
+        description: "Source Type"
+        required: true
+        type: choice
+        options:
+          - "google"
+          - "clone"
+        default: "google"
+        
+      GIT_REPO:
+        description: "(Clone Only) Git Repository URL"
+        required: false
+        default: "https://github.com/ramabondanp/android_kernel_common-5.10"
+        
+      GIT_BRANCH:
+        description: "(Clone Only) Git Branch"
+        required: false
+        default: "android12-5.10"
 
 jobs:
   build:
@@ -57,6 +76,9 @@ jobs:
       ENABLE_KSU: ${{ inputs.ENABLE_KERNELSU_NEXT }}
       KSU_BRANCH: ${{ inputs.KSU_NEXT_BRANCH || 'dev' }}
       LTO: ${{ inputs.LTO_TYPE || 'thin' }}
+      SOURCE_TYPE: ${{ inputs.SOURCE_TYPE || 'google' }}
+      GIT_REPO: ${{ inputs.GIT_REPO }}
+      GIT_BRANCH: ${{ inputs.GIT_BRANCH }}
 
     steps:
       # ──────────────────────────────────────────────
@@ -137,25 +159,31 @@ jobs:
       # ──────────────────────────────────────────────
       - name: Sync kernel source
         run: |
-          # Google manifest branches use the format: common-androidXX-Y.Z-YYYY-MM
-          # We strip any _r* suffix from the upstream branch (e.g. android14-6.1-2026-06_r1)
-          # because the manifest repo only uses the month.
-          UPSTREAM_CLEAN="${UPSTREAM_BRANCH%_r*}"
-          MANIFEST_BRANCH="common-${UPSTREAM_CLEAN}"
-          echo "Manifest branch: $MANIFEST_BRANCH"
-
           mkdir -p kernel-build && cd kernel-build
 
-          echo "::group::Initializing repo (manifest: $MANIFEST_BRANCH)"
-          repo init \
-            -u https://android.googlesource.com/kernel/manifest \
-            -b "$MANIFEST_BRANCH" \
-            --depth=1
-          echo "::endgroup::"
-
-          echo "::group::Syncing kernel source tree"
-          repo sync -j"$(nproc)" --force-sync --no-clone-bundle --no-tags --current-branch
-          echo "::endgroup::"
+          if [ "$SOURCE_TYPE" = "clone" ]; then
+            echo "::group::Cloning kernel source tree from $GIT_REPO"
+            git clone --depth=1 --branch "$GIT_BRANCH" "$GIT_REPO" common
+            echo "::endgroup::"
+          else
+            # Google manifest branches use the format: common-androidXX-Y.Z-YYYY-MM
+            # We strip any _r* suffix from the upstream branch (e.g. android14-6.1-2026-06_r1)
+            # because the manifest repo only uses the month.
+            UPSTREAM_CLEAN="${UPSTREAM_BRANCH%_r*}"
+            MANIFEST_BRANCH="common-${UPSTREAM_CLEAN}"
+            echo "Manifest branch: $MANIFEST_BRANCH"
+  
+            echo "::group::Initializing repo (manifest: $MANIFEST_BRANCH)"
+            repo init \
+              -u https://android.googlesource.com/kernel/manifest \
+              -b "$MANIFEST_BRANCH" \
+              --depth=1
+            echo "::endgroup::"
+  
+            echo "::group::Syncing kernel source tree"
+            repo sync -j"$(nproc)" --force-sync --no-clone-bundle --no-tags --current-branch
+            echo "::endgroup::"
+          fi
 
           echo "── Kernel source tree ──"
           ls -la
@@ -336,92 +364,6 @@ jobs:
           echo "Build name : $BUILD_NAME"
           echo "Release tag: $RELEASE_TAG"
 
-      - name: Package with AnyKernel3
-        id: package
-        run: |
-          echo "::group::Cloning AnyKernel3"
-          git clone https://github.com/osm0sis/AnyKernel3 --depth=1 AnyKernel3-tmp
-          rm -rf AnyKernel3-tmp/.git AnyKernel3-tmp/.github
-          echo "::endgroup::"
-
-          # Write AnyKernel3 config for GKI
-          cat > AnyKernel3-tmp/anykernel.sh << 'AKEOF'
-          # AnyKernel3 Ramdisk Mod Script
-          # osm0sis @ xda-developers
-
-          ## AnyKernel setup
-          properties() { '
-          kernel.string=${{ env.KERNEL_NAME }} Kernel by @kaminarich
-          do.devicecheck=0
-          do.modules=0
-          do.systemless=1
-          do.cleanup=1
-          do.cleanuponabort=0
-          device.name1=
-          supported.versions=
-          supported.patchlevels=
-          '; }
-
-          ### AnyKernel install
-
-          # boot shell variables
-          BLOCK=boot;
-          IS_SLOT_DEVICE=auto;
-          RAMDISK_COMPRESSION=auto;
-          PATCH_VBMETA_FLAG=auto;
-          NO_BLOCK_DISPLAY=1;
-          NO_MAGISK_CHECK=1;
-
-          # import functions/variables and setup patching - see for reference (DO NOT REMOVE)
-          . tools/ak3-core.sh;
-
-          # variables
-          supported=false
-          # Loop to check if the current kernel version is in the supported_kvers list
-          supported_kvers='5.10 6.1 6.6'
-
-          # check current kernel version
-          kernel_version=$(cat /proc/version | awk -F '-' '{print $1}' | awk '{print $3}' | cut -f1-2 -d'.')
-
-          for ver in $supported_kvers; do
-            if [ "$kernel_version" == "$ver" ]; then
-              supported=true
-              break
-            fi
-          done
-
-          if ! $supported; then
-            abort "- Unsupported kernel version: $kernel_version, abort."
-          fi
-
-          # boot install
-          split_boot
-          if [ -f "split_img/ramdisk.cpio" ]; then
-              unpack_ramdisk
-              write_boot
-          else
-              flash_boot
-          fi
-          ## end boot install
-          AKEOF
-
-          # Copy all kernel images
-          for img in Image Image.lz4; do
-            if [ -f "$GITHUB_WORKSPACE/dist/$img" ]; then
-              cp "$GITHUB_WORKSPACE/dist/$img" AnyKernel3-tmp/
-              echo "✓ Copied $img"
-            fi
-          done
-
-          # Create flashable zip
-          cd AnyKernel3-tmp
-          ZIP_NAME="${{ steps.artifacts.outputs.build_name }}-AnyKernel3.zip"
-          zip -r9 "$GITHUB_WORKSPACE/$ZIP_NAME" . -x '*.git*' -x 'README.md' -x 'LICENSE'
-          echo "✓ Created: $ZIP_NAME"
-
-          echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
-          echo "zip_path=$GITHUB_WORKSPACE/$ZIP_NAME" >> "$GITHUB_OUTPUT"
-
       # ──────────────────────────────────────────────
       # 8. Upload & Release
       # ──────────────────────────────────────────────
@@ -430,8 +372,8 @@ jobs:
         with:
           name: ${{ steps.artifacts.outputs.build_name }}
           path: |
-            ${{ steps.package.outputs.zip_path }}
-            ${{ github.workspace }}/dist/Image*
+            ${{ github.workspace }}/dist/Image
+            ${{ github.workspace }}/dist/Image.lz4
           retention-days: 30
           compression-level: 0
 
@@ -454,14 +396,19 @@ jobs:
             | **Date** | `${{ steps.artifacts.outputs.date_tag }}` |
 
             ### 📥 Flash Instructions
-            1. Download the `AnyKernel3.zip` file below
-            2. Flash via custom recovery (TWRP / OrangeFox) or via `adb sideload`
-            3. Reboot
+            > [!WARNING]
+            > **Do NOT use AnyKernel to flash GKI kernels unless you repack init_boot correctly.**
+            
+            1. Download the `Image` file below.
+            2. Flash via **KernelSU Manager App** directly.
+            3. OR Flash via fastboot: `fastboot flash boot Image`
+            4. Reboot
 
             ### 📦 Source
             - **Kernel**: [android.googlesource.com/kernel/common](https://android.googlesource.com/kernel/common/+/refs/heads/${{ inputs.UPSTREAM_BRANCH }})
             ${{ inputs.ENABLE_KERNELSU_NEXT == true && format('- **KernelSU-Next**: [KernelSU-Next/{0}](https://github.com/KernelSU-Next/KernelSU-Next/tree/{0})', inputs.KSU_NEXT_BRANCH) || '' }}
           files: |
-            ${{ steps.package.outputs.zip_path }}
+            ${{ github.workspace }}/dist/Image
+            ${{ github.workspace }}/dist/Image.lz4
           draft: false
           prerelease: false
