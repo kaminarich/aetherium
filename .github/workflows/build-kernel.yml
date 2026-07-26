@@ -137,7 +137,11 @@ jobs:
       # ──────────────────────────────────────────────
       - name: Sync kernel source
         run: |
-          MANIFEST_BRANCH="common-${UPSTREAM_BRANCH}"
+          # Google manifest branches use the format: common-androidXX-Y.Z-YYYY-MM
+          # We strip any _r* suffix from the upstream branch (e.g. android14-6.1-2026-06_r1)
+          # because the manifest repo only uses the month.
+          UPSTREAM_CLEAN="${UPSTREAM_BRANCH%_r*}"
+          MANIFEST_BRANCH="common-${UPSTREAM_CLEAN}"
           echo "Manifest branch: $MANIFEST_BRANCH"
 
           mkdir -p kernel-build && cd kernel-build
@@ -219,14 +223,13 @@ jobs:
           fi
 
       # ──────────────────────────────────────────────
-      # 5. Prepare build environment (version-specific)
+      # 5. Prepare build environment
       # ──────────────────────────────────────────────
-      - name: Prepare build (android14-6.1)
-        if: inputs.KERNEL_VERSION == 'android14-6.1'
+      - name: Normalize defconfig
         run: |
           cd kernel-build
 
-          # ── Normalize defconfig for Bazel's strict consistency check ──
+          # ── Normalize defconfig for strict consistency check ──
           echo "::group::Normalizing defconfig (savedefconfig)"
           cd common
           make ARCH=arm64 O=../out_defconfig_tmp gki_defconfig 2>&1 | tail -3
@@ -237,7 +240,10 @@ jobs:
           echo "::endgroup::"
           echo "✓ Defconfig normalized"
 
-          # ── Remove protected exports checks ──
+      - name: Prepare build (android14-6.1)
+        if: inputs.KERNEL_VERSION == 'android14-6.1'
+        run: |
+          cd kernel-build
           # GKI 6.1 enforces protected symbol export lists.
           # KernelSU adds symbols not in the official list → build fails.
           if [ -f "common/BUILD.bazel" ]; then
@@ -270,9 +276,10 @@ jobs:
         run: |
           cd kernel-build
 
-          # Disable KMI/ABI strict checks for custom kernel builds
+          # Disable KMI/ABI strict checks & defconfig formatting checks
           export KMI_SYMBOL_LIST_STRICT_MODE=0
           export TRIM_NONLISTED_KMI=0
+          export SKIP_DEFCONFIG_CHECK=1
 
           echo "::group::Building kernel with build.sh (LTO=$LTO)"
           DIST_DIR="$GITHUB_WORKSPACE/dist" \
