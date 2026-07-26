@@ -352,9 +352,10 @@ elif [ "$KERNEL_VERSION" = "android12-5.10" ]; then
     # ── Legacy build.sh ──
     info "Building kernel with build.sh (LTO=$LTO)..."
 
-    # Disable KMI/ABI strict checks for custom kernel builds
+    # Disable KMI/ABI strict checks & defconfig formatting checks
     export KMI_SYMBOL_LIST_STRICT_MODE=0
     export TRIM_NONLISTED_KMI=0
+    export SKIP_DEFCONFIG_CHECK=1
 
     DIST_DIR="$DIST_DIR" \
     LTO="$LTO" \
