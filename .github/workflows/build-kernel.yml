@@ -186,14 +186,24 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/${KSU_BRANCH}/kernel/setup.sh" | bash -s "$KSU_BRANCH"
           echo "::endgroup::"
 
-          # Enable KSU configs in GKI defconfig
+          # Enable KSU + required support configs in GKI defconfig
           DEFCONFIG="common/arch/arm64/configs/gki_defconfig"
           if [ -f "$DEFCONFIG" ]; then
             echo "" >> "$DEFCONFIG"
             echo "# KernelSU-Next" >> "$DEFCONFIG"
             echo "CONFIG_KSU=y" >> "$DEFCONFIG"
             echo "CONFIG_KSU_KPROBE_HOOKS=y" >> "$DEFCONFIG"
-            echo "✓ KernelSU-Next config flags added to gki_defconfig"
+
+            echo "" >> "$DEFCONFIG"
+            echo "# Required for KSU (overlay, kprobes, xattr)" >> "$DEFCONFIG"
+            echo "CONFIG_OVERLAY_FS=y" >> "$DEFCONFIG"
+            echo "CONFIG_KPROBES=y" >> "$DEFCONFIG"
+            echo "CONFIG_HAVE_KPROBES=y" >> "$DEFCONFIG"
+            echo "CONFIG_KPROBE_EVENTS=y" >> "$DEFCONFIG"
+            echo "CONFIG_TMPFS_XATTR=y" >> "$DEFCONFIG"
+            echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$DEFCONFIG"
+
+            echo "✓ KernelSU-Next + support configs added to gki_defconfig"
           else
             echo "::warning::gki_defconfig not found at $DEFCONFIG"
           fi
@@ -201,31 +211,40 @@ jobs:
           # Verify integration
           if [ -d "common/drivers/kernelsu" ]; then
             echo "✓ KernelSU-Next source found at common/drivers/kernelsu"
-            ls -la common/drivers/kernelsu/
           elif [ -d "drivers/kernelsu" ]; then
             echo "✓ KernelSU-Next source found at drivers/kernelsu"
-            ls -la drivers/kernelsu/
           else
             echo "::error::KernelSU-Next integration failed — source directory not found"
             exit 1
           fi
 
       # ──────────────────────────────────────────────
-      # 5. Normalize defconfig (Bazel compatibility)
+      # 5. Prepare build environment (version-specific)
       # ──────────────────────────────────────────────
-      - name: Normalize defconfig for Kleaf/Bazel
+      - name: Prepare build (android14-6.1)
         if: inputs.KERNEL_VERSION == 'android14-6.1'
         run: |
-          cd kernel-build/common
+          cd kernel-build
 
+          # ── Normalize defconfig for Bazel's strict consistency check ──
           echo "::group::Normalizing defconfig (savedefconfig)"
+          cd common
           make ARCH=arm64 O=../out_defconfig_tmp gki_defconfig 2>&1 | tail -3
           make ARCH=arm64 O=../out_defconfig_tmp savedefconfig 2>&1 | tail -3
           cp ../out_defconfig_tmp/defconfig arch/arm64/configs/gki_defconfig
           rm -rf ../out_defconfig_tmp
+          cd ..
           echo "::endgroup::"
+          echo "✓ Defconfig normalized"
 
-          echo "✓ Defconfig normalized for Kleaf/Bazel build check"
+          # ── Remove protected exports checks ──
+          # GKI 6.1 enforces protected symbol export lists.
+          # KernelSU adds symbols not in the official list → build fails.
+          if [ -f "common/BUILD.bazel" ]; then
+            sed -i '/protected_exports_list/d' common/BUILD.bazel 2>/dev/null || true
+            echo "✓ Protected exports check removed from BUILD.bazel"
+          fi
+          rm -f common/android/abi_gki_protected_exports_* 2>/dev/null || true
 
       # ──────────────────────────────────────────────
       # 6. Build Kernel
@@ -235,14 +254,12 @@ jobs:
         run: |
           cd kernel-build
 
-          # Bypass KMI strict mode for custom kernel builds (KernelSU adds new symbols)
-          if [ -f "common/BUILD.bazel" ]; then
-            sed -i 's/kmi_symbol_list_strict_mode = True/kmi_symbol_list_strict_mode = False/g' common/BUILD.bazel 2>/dev/null || true
-            echo "✓ KMI strict mode disabled in BUILD.bazel"
-          fi
-
           echo "::group::Building kernel with Kleaf/Bazel (LTO=$LTO)"
-          LTO="$LTO" tools/bazel run //common:kernel_aarch64_dist -- --dist_dir="$GITHUB_WORKSPACE/dist"
+          LTO="$LTO" tools/bazel run \
+            --config=fast \
+            --nokmi_symbol_list_strict_mode \
+            //common:kernel_aarch64_dist \
+            -- --dist_dir="$GITHUB_WORKSPACE/dist"
           echo "::endgroup::"
 
           echo "── Build output ──"
@@ -252,6 +269,10 @@ jobs:
         if: inputs.KERNEL_VERSION == 'android12-5.10'
         run: |
           cd kernel-build
+
+          # Disable KMI/ABI strict checks for custom kernel builds
+          export KMI_SYMBOL_LIST_STRICT_MODE=0
+          export TRIM_NONLISTED_KMI=0
 
           echo "::group::Building kernel with build.sh (LTO=$LTO)"
           DIST_DIR="$GITHUB_WORKSPACE/dist" \
