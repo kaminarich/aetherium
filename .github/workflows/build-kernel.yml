@@ -313,11 +313,36 @@ jobs:
           export TRIM_NONLISTED_KMI=0
           export SKIP_DEFCONFIG_CHECK=1
 
-          echo "::group::Building kernel with build.sh (LTO=$LTO)"
-          DIST_DIR="$GITHUB_WORKSPACE/dist" \
-          LTO="$LTO" \
-          BUILD_CONFIG=common/build.config.gki.aarch64 \
-          build/build.sh
+          echo "::group::Building kernel (LTO=$LTO)"
+          if [ "$SOURCE_TYPE" = "clone" ]; then
+            # Standalone make build for cloned sources
+            TOOLCHAIN_DIR="$GITHUB_WORKSPACE/toolchain"
+            git clone --depth=1 https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git "$TOOLCHAIN_DIR"
+            
+            export PATH="$TOOLCHAIN_DIR/bin:$PATH"
+            export ARCH=arm64
+            export LLVM=1
+            export LLVM_IAS=1
+            export CROSS_COMPILE=aarch64-linux-gnu-
+            
+            cd common
+            make O=../out gki_defconfig
+            if [ "$LTO" = "thin" ]; then
+              scripts/config --file ../out/.config -e LTO_CLANG -e LTO_CLANG_THIN -d LTO_NONE -d LTO_CLANG_FULL
+              make O=../out olddefconfig
+            fi
+            
+            make O=../out -j"$(nproc --all)" Image
+            cd ..
+            
+            cp out/arch/arm64/boot/Image* "$GITHUB_WORKSPACE/dist/"
+          else
+            # AOSP wrapper build
+            DIST_DIR="$GITHUB_WORKSPACE/dist" \
+            LTO="$LTO" \
+            BUILD_CONFIG=common/build.config.gki.aarch64 \
+            build/build.sh
+          fi
           echo "::endgroup::"
 
           echo "── Build output ──"
@@ -398,7 +423,6 @@ jobs:
             | **LTO** | `${{ inputs.LTO_TYPE }}` |
             | **Build** | `#${{ github.run_number }}` |
             | **Date** | `${{ steps.artifacts.outputs.date_tag }}` |
-
 
 
             ### 📦 Source
