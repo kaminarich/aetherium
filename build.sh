@@ -267,7 +267,7 @@ fi
 # ═══════════════════════════════════════════════════════════
 if [ "$ENABLE_KSU" = "true" ]; then
     info "Integrating KernelSU-Next (branch: $KSU_BRANCH)..."
-    curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/${KSU_BRANCH}/kernel/setup.sh" | bash -s "$KSU_BRANCH"
+    curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/${KSU_BRANCH}/kernel/setup.sh" | bash -s "$KSU_BRANCH"
 
     # Enable KSU + required support configs in defconfig
     if [ -f "$DEFCONFIG" ]; then
@@ -419,5 +419,4 @@ echo ""
 ls -lh "$DIST_DIR/" | grep -E "Image|vmlinux" || true
 echo ""
 
-echo ""
 log "Done! Flash the Image via KernelSU or fastboot."
