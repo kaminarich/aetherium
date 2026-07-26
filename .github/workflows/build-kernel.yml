@@ -17,10 +17,29 @@ on:
           - "android12-5.10"
         default: "android14-6.1"
 
+      SOURCE_TYPE:
+        description: "Source: google (AOSP repo sync) or clone (custom git repo)"
+        required: true
+        type: choice
+        options:
+          - "google"
+          - "clone"
+        default: "google"
+
       UPSTREAM_BRANCH:
-        description: "AOSP upstream branch (e.g. android14-6.1-2026-06 or android12-5.10-2026-07)"
+        description: "(Google Only) AOSP upstream branch (e.g. android14-6.1-2026-06)"
         required: false
         default: "android14-6.1-2026-06"
+
+      GIT_REPO:
+        description: "(Clone Only) Git Repository URL"
+        required: false
+        default: "https://github.com/ramabondanp/android_kernel_common-5.10"
+
+      GIT_BRANCH:
+        description: "(Clone Only) Git Branch"
+        required: false
+        default: "android12-5.10"
 
       ENABLE_KERNELSU_NEXT:
         description: "Patch KernelSU-Next into kernel"
@@ -29,9 +48,9 @@ on:
         default: true
 
       KSU_NEXT_BRANCH:
-        description: "KernelSU-Next branch (e.g. dev, next, stable, or a tag)"
+        description: "KernelSU-Next branch (e.g. dev, dev-susfs, next, stable)"
         required: false
-        default: "dev"
+        default: "dev-susfs"
 
       LTO_TYPE:
         description: "LTO (Link Time Optimization) type"
@@ -42,29 +61,10 @@ on:
           - "full"
           - "none"
         default: "thin"
-        
-      SOURCE_TYPE:
-        description: "Source Type"
-        required: true
-        type: choice
-        options:
-          - "google"
-          - "clone"
-        default: "google"
-        
-      GIT_REPO:
-        description: "(Clone Only) Git Repository URL"
-        required: false
-        default: "https://github.com/ramabondanp/android_kernel_common-5.10"
-        
-      GIT_BRANCH:
-        description: "(Clone Only) Git Branch"
-        required: false
-        default: "android12-5.10"
 
 jobs:
   build:
-    name: "Build ${{ inputs.UPSTREAM_BRANCH }}"
+    name: "${{ inputs.KERNEL_NAME }} | ${{ inputs.KERNEL_VERSION }} | ${{ inputs.SOURCE_TYPE }}"
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -74,7 +74,7 @@ jobs:
       KERNEL_VERSION: ${{ inputs.KERNEL_VERSION }}
       UPSTREAM_BRANCH: ${{ inputs.UPSTREAM_BRANCH }}
       ENABLE_KSU: ${{ inputs.ENABLE_KERNELSU_NEXT }}
-      KSU_BRANCH: ${{ inputs.KSU_NEXT_BRANCH || 'dev' }}
+      KSU_BRANCH: ${{ inputs.KSU_NEXT_BRANCH || 'dev-susfs' }}
       LTO: ${{ inputs.LTO_TYPE || 'thin' }}
       SOURCE_TYPE: ${{ inputs.SOURCE_TYPE || 'google' }}
       GIT_REPO: ${{ inputs.GIT_REPO }}
@@ -109,6 +109,7 @@ jobs:
             python-is-python3 rsync zip unzip jq
 
       - name: Install repo tool
+        if: inputs.SOURCE_TYPE == 'google'
         run: |
           mkdir -p "$HOME/.bin"
           curl -s https://storage.googleapis.com/git-repo-downloads/repo > "$HOME/.bin/repo"
@@ -137,72 +138,92 @@ jobs:
       # ──────────────────────────────────────────────
       - name: Validate inputs
         run: |
-          echo "╔══════════════════════════════════════╗"
-          echo "║       Build Configuration            ║"
-          echo "╠══════════════════════════════════════╣"
+          echo "╔══════════════════════════════════════════╗"
+          echo "║         Build Configuration              ║"
+          echo "╠══════════════════════════════════════════╣"
           echo "║ Kernel Name    : $KERNEL_NAME"
           echo "║ Kernel Version : $KERNEL_VERSION"
-          echo "║ Upstream Branch: $UPSTREAM_BRANCH"
+          echo "║ Source Type    : $SOURCE_TYPE"
+          if [ "$SOURCE_TYPE" = "google" ]; then
+            echo "║ Upstream Branch: $UPSTREAM_BRANCH"
+          else
+            echo "║ Git Repo       : $GIT_REPO"
+            echo "║ Git Branch     : $GIT_BRANCH"
+          fi
           echo "║ KernelSU-Next  : $ENABLE_KSU (branch: $KSU_BRANCH)"
           echo "║ LTO Type       : $LTO"
-          echo "╚══════════════════════════════════════╝"
+          echo "╚══════════════════════════════════════════╝"
 
-          # Validate branch matches kernel version
+          # Validate branch matches kernel version (Google source only)
           if [ "$SOURCE_TYPE" = "google" ]; then
+            if [ -z "$UPSTREAM_BRANCH" ]; then
+              echo "::error::UPSTREAM_BRANCH is required when SOURCE_TYPE is 'google'"
+              exit 1
+            fi
             if [[ "$UPSTREAM_BRANCH" != "$KERNEL_VERSION"* ]]; then
               echo "::error::Upstream branch '$UPSTREAM_BRANCH' does not match kernel version '$KERNEL_VERSION'"
               echo "::error::Branch should start with '$KERNEL_VERSION' (e.g., ${KERNEL_VERSION}-2026-06)"
               exit 1
             fi
           else
-            echo "::notice::Clone source selected, bypassing UPSTREAM_BRANCH validation."
+            if [ -z "$GIT_REPO" ] || [ -z "$GIT_BRANCH" ]; then
+              echo "::error::GIT_REPO and GIT_BRANCH are required when SOURCE_TYPE is 'clone'"
+              exit 1
+            fi
           fi
 
       # ──────────────────────────────────────────────
-      # 3. Sync Kernel Source
+      # 3. Fetch Kernel Source
       # ──────────────────────────────────────────────
-      - name: Sync kernel source
+      - name: Fetch kernel source (Google AOSP)
+        if: inputs.SOURCE_TYPE == 'google'
         run: |
+          UPSTREAM_CLEAN="${UPSTREAM_BRANCH%_r*}"
+          MANIFEST_BRANCH="common-${UPSTREAM_CLEAN}"
+          echo "Manifest branch: $MANIFEST_BRANCH"
+
           mkdir -p kernel-build && cd kernel-build
 
-          if [ "$SOURCE_TYPE" = "clone" ]; then
-            echo "::group::Cloning kernel source tree from $GIT_REPO"
-            git clone --depth=1 --branch "$GIT_BRANCH" "$GIT_REPO" common
-            echo "::endgroup::"
-          else
-            # Google manifest branches use the format: common-androidXX-Y.Z-YYYY-MM
-            # We strip any _r* suffix from the upstream branch (e.g. android14-6.1-2026-06_r1)
-            # because the manifest repo only uses the month.
-            UPSTREAM_CLEAN="${UPSTREAM_BRANCH%_r*}"
-            MANIFEST_BRANCH="common-${UPSTREAM_CLEAN}"
-            echo "Manifest branch: $MANIFEST_BRANCH"
-  
-            echo "::group::Initializing repo (manifest: $MANIFEST_BRANCH)"
-            repo init \
-              -u https://android.googlesource.com/kernel/manifest \
-              -b "$MANIFEST_BRANCH" \
-              --depth=1
-            echo "::endgroup::"
-  
-            echo "::group::Syncing kernel source tree"
-            repo sync -j"$(nproc)" --force-sync --no-clone-bundle --no-tags --current-branch
-            echo "::endgroup::"
-          fi
+          echo "::group::Initializing repo (manifest: $MANIFEST_BRANCH)"
+          repo init \
+            -u https://android.googlesource.com/kernel/manifest \
+            -b "$MANIFEST_BRANCH" \
+            --depth=1
+          echo "::endgroup::"
+
+          echo "::group::Syncing kernel source tree"
+          repo sync -j"$(nproc)" --force-sync --no-clone-bundle --no-tags --current-branch
+          echo "::endgroup::"
 
           echo "── Kernel source tree ──"
           ls -la
           echo "── Disk usage ──"
           df -h /
 
+      - name: Fetch kernel source (Git Clone)
+        if: inputs.SOURCE_TYPE == 'clone'
+        run: |
+          mkdir -p kernel-build && cd kernel-build
+
+          echo "::group::Cloning $GIT_REPO (branch: $GIT_BRANCH)"
+          git clone --depth=1 --branch "$GIT_BRANCH" "$GIT_REPO" common
+          echo "::endgroup::"
+
+          echo "── Kernel source tree ──"
+          ls -la common/
+          echo "── Disk usage ──"
+          df -h /
+
+      # ──────────────────────────────────────────────
+      # 4. Set custom kernel name
+      # ──────────────────────────────────────────────
       - name: Set custom kernel name
         run: |
           cd kernel-build
 
           DEFCONFIG="common/arch/arm64/configs/gki_defconfig"
           if [ -f "$DEFCONFIG" ]; then
-            # Remove any existing LOCALVERSION line
             sed -i '/^CONFIG_LOCALVERSION=/d' "$DEFCONFIG"
-            # Set custom kernel name
             echo "CONFIG_LOCALVERSION=\"-${KERNEL_NAME}\"" >> "$DEFCONFIG"
             echo "CONFIG_LOCALVERSION_AUTO=n" >> "$DEFCONFIG"
             echo "✓ Kernel name set to: -${KERNEL_NAME}"
@@ -211,7 +232,7 @@ jobs:
           fi
 
       # ──────────────────────────────────────────────
-      # 4. Patch KernelSU-Next
+      # 5. Patch KernelSU-Next
       # ──────────────────────────────────────────────
       - name: Patch KernelSU-Next
         if: inputs.ENABLE_KERNELSU_NEXT == true
@@ -219,7 +240,7 @@ jobs:
           cd kernel-build
 
           echo "::group::Integrating KernelSU-Next (branch: $KSU_BRANCH)"
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/${KSU_BRANCH}/kernel/setup.sh" | bash -s "$KSU_BRANCH"
+          curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/${KSU_BRANCH}/kernel/setup.sh" | bash -s "$KSU_BRANCH"
           echo "::endgroup::"
 
           # Enable KSU + required support configs in GKI defconfig
@@ -255,13 +276,13 @@ jobs:
           fi
 
       # ──────────────────────────────────────────────
-      # 5. Prepare build environment
+      # 6. Prepare build environment
       # ──────────────────────────────────────────────
       - name: Normalize defconfig
+        if: inputs.SOURCE_TYPE == 'google'
         run: |
           cd kernel-build
 
-          # ── Normalize defconfig for strict consistency check ──
           echo "::group::Normalizing defconfig (savedefconfig)"
           cd common
           make ARCH=arm64 O=../out_defconfig_tmp gki_defconfig 2>&1 | tail -3
@@ -272,12 +293,10 @@ jobs:
           echo "::endgroup::"
           echo "✓ Defconfig normalized"
 
-      - name: Prepare build (android14-6.1)
-        if: inputs.KERNEL_VERSION == 'android14-6.1'
+      - name: Prepare build (android14-6.1 / Google)
+        if: inputs.KERNEL_VERSION == 'android14-6.1' && inputs.SOURCE_TYPE == 'google'
         run: |
           cd kernel-build
-          # GKI 6.1 enforces protected symbol export lists.
-          # KernelSU adds symbols not in the official list → build fails.
           if [ -f "common/BUILD.bazel" ]; then
             sed -i '/protected_exports_list/d' common/BUILD.bazel 2>/dev/null || true
             echo "✓ Protected exports check removed from BUILD.bazel"
@@ -285,12 +304,63 @@ jobs:
           rm -f common/android/abi_gki_protected_exports_* 2>/dev/null || true
 
       # ──────────────────────────────────────────────
-      # 6. Build Kernel
+      # 7. Build Kernel
       # ──────────────────────────────────────────────
-      - name: Build kernel (android14-6.1 / Kleaf-Bazel)
-        if: inputs.KERNEL_VERSION == 'android14-6.1'
+
+      # ── Clone source: standalone make build ──
+      - name: Build kernel (standalone make)
+        if: inputs.SOURCE_TYPE == 'clone'
         run: |
           cd kernel-build
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+
+          # Download standalone Clang toolchain
+          TOOLCHAIN_DIR="$GITHUB_WORKSPACE/toolchain"
+          if [ "$KERNEL_VERSION" = "android12-5.10" ]; then
+            echo "::group::Downloading Clang (r416183b / Clang 12)"
+            git clone --depth=1 https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git "$TOOLCHAIN_DIR"
+            echo "::endgroup::"
+          else
+            echo "::group::Downloading Clang (r536225 / Clang 19)"
+            git clone --depth=1 https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r536225.git "$TOOLCHAIN_DIR"
+            echo "::endgroup::"
+          fi
+
+          export PATH="$TOOLCHAIN_DIR/bin:$PATH"
+          export ARCH=arm64
+          export LLVM=1
+          export LLVM_IAS=1
+          export CROSS_COMPILE=aarch64-linux-gnu-
+
+          cd common
+
+          echo "::group::Configuring kernel (gki_defconfig)"
+          make O=../out gki_defconfig
+          echo "::endgroup::"
+
+          if [ "$LTO" = "thin" ]; then
+            echo "::group::Applying LTO=thin"
+            scripts/config --file ../out/.config -e LTO_CLANG -e LTO_CLANG_THIN -d LTO_NONE -d LTO_CLANG_FULL
+            make O=../out olddefconfig
+            echo "::endgroup::"
+          fi
+
+          echo "::group::Compiling kernel Image"
+          make O=../out -j"$(nproc --all)" Image
+          echo "::endgroup::"
+
+          cd ..
+          cp out/arch/arm64/boot/Image* "$GITHUB_WORKSPACE/dist/" 2>/dev/null || true
+
+          echo "── Build output ──"
+          ls -la "$GITHUB_WORKSPACE/dist/" || true
+
+      # ── Google source: android14-6.1 Kleaf/Bazel ──
+      - name: Build kernel (android14-6.1 / Kleaf-Bazel)
+        if: inputs.KERNEL_VERSION == 'android14-6.1' && inputs.SOURCE_TYPE == 'google'
+        run: |
+          cd kernel-build
+          mkdir -p "$GITHUB_WORKSPACE/dist"
 
           echo "::group::Building kernel with Kleaf/Bazel (LTO=$LTO)"
           LTO="$LTO" tools/bazel run \
@@ -303,53 +373,28 @@ jobs:
           echo "── Build output ──"
           ls -la "$GITHUB_WORKSPACE/dist/" || true
 
+      # ── Google source: android12-5.10 build.sh ──
       - name: Build kernel (android12-5.10 / build.sh)
-        if: inputs.KERNEL_VERSION == 'android12-5.10'
+        if: inputs.KERNEL_VERSION == 'android12-5.10' && inputs.SOURCE_TYPE == 'google'
         run: |
           cd kernel-build
 
-          # Disable KMI/ABI strict checks & defconfig formatting checks
           export KMI_SYMBOL_LIST_STRICT_MODE=0
           export TRIM_NONLISTED_KMI=0
           export SKIP_DEFCONFIG_CHECK=1
 
-          echo "::group::Building kernel (LTO=$LTO)"
-          if [ "$SOURCE_TYPE" = "clone" ]; then
-            # Standalone make build for cloned sources
-            TOOLCHAIN_DIR="$GITHUB_WORKSPACE/toolchain"
-            git clone --depth=1 https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git "$TOOLCHAIN_DIR"
-            
-            export PATH="$TOOLCHAIN_DIR/bin:$PATH"
-            export ARCH=arm64
-            export LLVM=1
-            export LLVM_IAS=1
-            export CROSS_COMPILE=aarch64-linux-gnu-
-            
-            cd common
-            make O=../out gki_defconfig
-            if [ "$LTO" = "thin" ]; then
-              scripts/config --file ../out/.config -e LTO_CLANG -e LTO_CLANG_THIN -d LTO_NONE -d LTO_CLANG_FULL
-              make O=../out olddefconfig
-            fi
-            
-            make O=../out -j"$(nproc --all)" Image
-            cd ..
-            
-            cp out/arch/arm64/boot/Image* "$GITHUB_WORKSPACE/dist/"
-          else
-            # AOSP wrapper build
-            DIST_DIR="$GITHUB_WORKSPACE/dist" \
-            LTO="$LTO" \
-            BUILD_CONFIG=common/build.config.gki.aarch64 \
-            build/build.sh
-          fi
+          echo "::group::Building kernel with build.sh (LTO=$LTO)"
+          DIST_DIR="$GITHUB_WORKSPACE/dist" \
+          LTO="$LTO" \
+          BUILD_CONFIG=common/build.config.gki.aarch64 \
+          build/build.sh
           echo "::endgroup::"
 
           echo "── Build output ──"
           ls -la "$GITHUB_WORKSPACE/dist/" || true
 
       # ──────────────────────────────────────────────
-      # 7. Prepare & Package Artifacts
+      # 8. Prepare & Package Artifacts
       # ──────────────────────────────────────────────
       - name: Prepare artifacts
         id: artifacts
@@ -377,24 +422,32 @@ jobs:
           echo "kernel_image=$KERNEL_IMAGE" >> "$GITHUB_OUTPUT"
           echo "kernel_image_name=$KERNEL_IMAGE_NAME" >> "$GITHUB_OUTPUT"
 
-          # Generate build name
+          # Generate build name based on source type
           KSU_TAG=""
           if [ "$ENABLE_KSU" = "true" ]; then
             KSU_TAG="-KSU-Next"
           fi
-          BUILD_NAME="${KERNEL_NAME}-${UPSTREAM_BRANCH}${KSU_TAG}"
+
+          if [ "$SOURCE_TYPE" = "clone" ]; then
+            SOURCE_LABEL="$GIT_BRANCH"
+          else
+            SOURCE_LABEL="$UPSTREAM_BRANCH"
+          fi
+
+          BUILD_NAME="${KERNEL_NAME}-${KERNEL_VERSION}-${SOURCE_TYPE}${KSU_TAG}"
           DATE_TAG=$(date +%Y%m%d)
           RELEASE_TAG="${BUILD_NAME}-${DATE_TAG}-${GITHUB_RUN_NUMBER}"
 
           echo "build_name=$BUILD_NAME" >> "$GITHUB_OUTPUT"
           echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "date_tag=$DATE_TAG" >> "$GITHUB_OUTPUT"
+          echo "source_label=$SOURCE_LABEL" >> "$GITHUB_OUTPUT"
 
           echo "Build name : $BUILD_NAME"
           echo "Release tag: $RELEASE_TAG"
 
       # ──────────────────────────────────────────────
-      # 8. Upload & Release
+      # 9. Upload & Release
       # ──────────────────────────────────────────────
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -418,16 +471,17 @@ jobs:
             |----------|-------|
             | **Kernel Name** | `${{ inputs.KERNEL_NAME }}` |
             | **Kernel Version** | `${{ inputs.KERNEL_VERSION }}` |
-            | **Upstream Branch** | [`${{ inputs.UPSTREAM_BRANCH }}`](https://android.googlesource.com/kernel/common/+/refs/heads/${{ inputs.UPSTREAM_BRANCH }}) |
-            | **KernelSU-Next** | ${{ inputs.ENABLE_KERNELSU_NEXT == true && format('✅ Enabled ([{0}](https://github.com/KernelSU-Next/KernelSU-Next/tree/{0}))', inputs.KSU_NEXT_BRANCH) || '❌ Disabled' }} |
+            | **Source Type** | `${{ inputs.SOURCE_TYPE }}` |
+            | **Source** | `${{ inputs.SOURCE_TYPE == 'clone' && inputs.GIT_BRANCH || inputs.UPSTREAM_BRANCH }}` |
+            | **KernelSU-Next** | ${{ inputs.ENABLE_KERNELSU_NEXT == true && format('✅ Enabled ([{0}](https://github.com/pershoot/KernelSU-Next/tree/{0}))', inputs.KSU_NEXT_BRANCH) || '❌ Disabled' }} |
             | **LTO** | `${{ inputs.LTO_TYPE }}` |
             | **Build** | `#${{ github.run_number }}` |
             | **Date** | `${{ steps.artifacts.outputs.date_tag }}` |
 
 
             ### 📦 Source
-            - **Kernel**: [android.googlesource.com/kernel/common](https://android.googlesource.com/kernel/common/+/refs/heads/${{ inputs.UPSTREAM_BRANCH }})
-            ${{ inputs.ENABLE_KERNELSU_NEXT == true && format('- **KernelSU-Next**: [KernelSU-Next/{0}](https://github.com/KernelSU-Next/KernelSU-Next/tree/{0})', inputs.KSU_NEXT_BRANCH) || '' }}
+            ${{ inputs.SOURCE_TYPE == 'clone' && format('- **Kernel**: [{0}]({1}) (branch: `{0}`)', inputs.GIT_BRANCH, inputs.GIT_REPO) || format('- **Kernel**: [AOSP GKI]({0})', format('https://android.googlesource.com/kernel/common/+/refs/heads/{0}', inputs.UPSTREAM_BRANCH)) }}
+            ${{ inputs.ENABLE_KERNELSU_NEXT == true && format('- **KernelSU-Next**: [pershoot/KernelSU-Next/{0}](https://github.com/pershoot/KernelSU-Next/tree/{0})', inputs.KSU_NEXT_BRANCH) || '' }}
           files: |
             ${{ github.workspace }}/dist/Image
             ${{ github.workspace }}/dist/Image.lz4
