@@ -418,5 +418,5 @@ echo -e "  ${YELLOW}${DIST_DIR}/${NC}"
 echo ""
 ls -lh "$DIST_DIR/" | grep -E "Image|vmlinux" || true
 echo ""
-
+echo ""
 log "Done! Flash the Image via KernelSU or fastboot."
