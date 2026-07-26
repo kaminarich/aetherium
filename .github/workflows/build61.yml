@@ -222,20 +222,18 @@ jobs:
 
           DEFCONFIG="arch/arm64/configs/gki_defconfig"
           if [ -f "$DEFCONFIG" ]; then
-            cat >> "$DEFCONFIG" <<'EOF'
-
-# KernelSU-Next
-CONFIG_KSU=y
-CONFIG_KSU_KPROBE_HOOKS=y
-
-# Required for KSU
-CONFIG_OVERLAY_FS=y
-CONFIG_KPROBES=y
-CONFIG_HAVE_KPROBES=y
-CONFIG_KPROBE_EVENTS=y
-CONFIG_TMPFS_XATTR=y
-CONFIG_TMPFS_POSIX_ACL=y
-EOF
+            echo "" >> "$DEFCONFIG"
+            echo "# KernelSU-Next" >> "$DEFCONFIG"
+            echo "CONFIG_KSU=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_KPROBE_HOOKS=y" >> "$DEFCONFIG"
+            echo "" >> "$DEFCONFIG"
+            echo "# Required for KSU" >> "$DEFCONFIG"
+            echo "CONFIG_OVERLAY_FS=y" >> "$DEFCONFIG"
+            echo "CONFIG_KPROBES=y" >> "$DEFCONFIG"
+            echo "CONFIG_HAVE_KPROBES=y" >> "$DEFCONFIG"
+            echo "CONFIG_KPROBE_EVENTS=y" >> "$DEFCONFIG"
+            echo "CONFIG_TMPFS_XATTR=y" >> "$DEFCONFIG"
+            echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$DEFCONFIG"
             echo "✓ KSU configs added"
           fi
 
