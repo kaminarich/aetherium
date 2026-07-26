@@ -211,7 +211,24 @@ jobs:
           fi
 
       # ──────────────────────────────────────────────
-      # 5. Build Kernel
+      # 5. Normalize defconfig (Bazel compatibility)
+      # ──────────────────────────────────────────────
+      - name: Normalize defconfig for Kleaf/Bazel
+        if: inputs.KERNEL_VERSION == 'android14-6.1'
+        run: |
+          cd kernel-build/common
+
+          echo "::group::Normalizing defconfig (savedefconfig)"
+          make ARCH=arm64 O=../out_defconfig_tmp gki_defconfig 2>&1 | tail -3
+          make ARCH=arm64 O=../out_defconfig_tmp savedefconfig 2>&1 | tail -3
+          cp ../out_defconfig_tmp/defconfig arch/arm64/configs/gki_defconfig
+          rm -rf ../out_defconfig_tmp
+          echo "::endgroup::"
+
+          echo "✓ Defconfig normalized for Kleaf/Bazel build check"
+
+      # ──────────────────────────────────────────────
+      # 6. Build Kernel
       # ──────────────────────────────────────────────
       - name: Build kernel (android14-6.1 / Kleaf-Bazel)
         if: inputs.KERNEL_VERSION == 'android14-6.1'
@@ -247,7 +264,7 @@ jobs:
           ls -la "$GITHUB_WORKSPACE/dist/" || true
 
       # ──────────────────────────────────────────────
-      # 6. Prepare & Package Artifacts
+      # 7. Prepare & Package Artifacts
       # ──────────────────────────────────────────────
       - name: Prepare artifacts
         id: artifacts
@@ -347,7 +364,7 @@ jobs:
           echo "zip_path=$GITHUB_WORKSPACE/$ZIP_NAME" >> "$GITHUB_OUTPUT"
 
       # ──────────────────────────────────────────────
-      # 7. Upload & Release
+      # 8. Upload & Release
       # ──────────────────────────────────────────────
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
