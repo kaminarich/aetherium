@@ -19,7 +19,7 @@ on:
 
       UPSTREAM_BRANCH:
         description: "AOSP upstream branch (e.g. android14-6.1-2026-06 or android12-5.10-2026-07)"
-        required: true
+        required: false
         default: "android14-6.1-2026-06"
 
       ENABLE_KERNELSU_NEXT:
@@ -148,10 +148,14 @@ jobs:
           echo "╚══════════════════════════════════════╝"
 
           # Validate branch matches kernel version
-          if [[ "$UPSTREAM_BRANCH" != "$KERNEL_VERSION"* ]]; then
-            echo "::error::Upstream branch '$UPSTREAM_BRANCH' does not match kernel version '$KERNEL_VERSION'"
-            echo "::error::Branch should start with '$KERNEL_VERSION' (e.g., ${KERNEL_VERSION}-2026-06)"
-            exit 1
+          if [ "$SOURCE_TYPE" = "google" ]; then
+            if [[ "$UPSTREAM_BRANCH" != "$KERNEL_VERSION"* ]]; then
+              echo "::error::Upstream branch '$UPSTREAM_BRANCH' does not match kernel version '$KERNEL_VERSION'"
+              echo "::error::Branch should start with '$KERNEL_VERSION' (e.g., ${KERNEL_VERSION}-2026-06)"
+              exit 1
+            fi
+          else
+            echo "::notice::Clone source selected, bypassing UPSTREAM_BRANCH validation."
           fi
 
       # ──────────────────────────────────────────────
@@ -395,14 +399,7 @@ jobs:
             | **Build** | `#${{ github.run_number }}` |
             | **Date** | `${{ steps.artifacts.outputs.date_tag }}` |
 
-            ### 📥 Flash Instructions
-            > [!WARNING]
-            > **Do NOT use AnyKernel to flash GKI kernels unless you repack init_boot correctly.**
-            
-            1. Download the `Image` file below.
-            2. Flash via **KernelSU Manager App** directly.
-            3. OR Flash via fastboot: `fastboot flash boot Image`
-            4. Reboot
+
 
             ### 📦 Source
             - **Kernel**: [android.googlesource.com/kernel/common](https://android.googlesource.com/kernel/common/+/refs/heads/${{ inputs.UPSTREAM_BRANCH }})
