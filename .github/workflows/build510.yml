@@ -216,37 +216,45 @@ jobs:
       # 4. Patch KernelSU-Next & SuSFS
       # ──────────────────────────────────────────────
       - name: Patch KernelSU-Next
-        if: inputs.ENABLE_KERNELSU_NEXT == true
         run: |
-          cd kernel
+          echo "KSU_VER=Disabled" >> $GITHUB_ENV
+          echo "SUSFS_VER=Disabled" >> $GITHUB_ENV
 
-          echo "::group::Integrating KernelSU-Next ($KSU_BRANCH)"
-          curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/${KSU_BRANCH}/kernel/setup.sh" | bash -s "$KSU_BRANCH"
-          echo "::endgroup::"
+          if [ "$ENABLE_KSU" = "true" ]; then
+            cd kernel
 
-          DEFCONFIG="arch/arm64/configs/gki_defconfig"
-          if [ -f "$DEFCONFIG" ]; then
-            echo "" >> "$DEFCONFIG"
-            echo "# KernelSU-Next" >> "$DEFCONFIG"
-            echo "CONFIG_KSU=y" >> "$DEFCONFIG"
-            echo "CONFIG_KSU_MANUAL_SU=n" >> "$DEFCONFIG"
-            echo "CONFIG_KSU_KPROBE_HOOKS=y" >> "$DEFCONFIG"
-            
-            echo "" >> "$DEFCONFIG"
-            echo "# Required for KSU" >> "$DEFCONFIG"
-            echo "CONFIG_OVERLAY_FS=y" >> "$DEFCONFIG"
-            echo "CONFIG_KPROBES=y" >> "$DEFCONFIG"
-            echo "CONFIG_HAVE_KPROBES=y" >> "$DEFCONFIG"
-            echo "CONFIG_KPROBE_EVENTS=y" >> "$DEFCONFIG"
-            echo "CONFIG_TMPFS_XATTR=y" >> "$DEFCONFIG"
-            echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$DEFCONFIG"
-            
-            echo "✓ KSU configs added"
-          fi
+            echo "::group::Integrating KernelSU-Next ($KSU_BRANCH)"
+            curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/${KSU_BRANCH}/kernel/setup.sh" | bash -s "$KSU_BRANCH"
+            echo "::endgroup::"
 
-          if [ ! -d "drivers/kernelsu" ]; then
-            echo "::error::KernelSU-Next integration failed"
-            exit 1
+            DEFCONFIG="arch/arm64/configs/gki_defconfig"
+            if [ -f "$DEFCONFIG" ]; then
+              echo "" >> "$DEFCONFIG"
+              echo "# KernelSU-Next" >> "$DEFCONFIG"
+              echo "CONFIG_KSU=y" >> "$DEFCONFIG"
+              echo "CONFIG_KSU_MANUAL_SU=n" >> "$DEFCONFIG"
+              echo "CONFIG_KSU_KPROBE_HOOKS=y" >> "$DEFCONFIG"
+              
+              echo "" >> "$DEFCONFIG"
+              echo "# Required for KSU" >> "$DEFCONFIG"
+              echo "CONFIG_OVERLAY_FS=y" >> "$DEFCONFIG"
+              echo "CONFIG_KPROBES=y" >> "$DEFCONFIG"
+              echo "CONFIG_HAVE_KPROBES=y" >> "$DEFCONFIG"
+              echo "CONFIG_KPROBE_EVENTS=y" >> "$DEFCONFIG"
+              echo "CONFIG_TMPFS_XATTR=y" >> "$DEFCONFIG"
+              echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$DEFCONFIG"
+              
+              echo "✓ KSU configs added"
+            fi
+
+            if [ ! -d "drivers/kernelsu" ]; then
+              echo "::error::KernelSU-Next integration failed"
+              exit 1
+            fi
+
+            # Set KSU version environment
+            echo "KSU_VER=${KSU_BRANCH}" >> $GITHUB_ENV
+            cd ..
           fi
 
       - name: Patch SuSFS for 5.10
@@ -280,6 +288,8 @@ jobs:
             echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> "$DEFCONFIG"
             echo "✓ SuSFS configs added"
           fi
+
+          echo "SUSFS_VER=1.5.5" >> $GITHUB_ENV
 
       # ──────────────────────────────────────────────
       # 5. Download toolchain & Build
@@ -338,9 +348,13 @@ jobs:
           echo "── Build output ──"
           ls -lh "$GITHUB_WORKSPACE/dist/"
 
-          # Print kernel version
+          # Extract kernel version dynamically
           if [ -f out/include/generated/utsrelease.h ]; then
-            echo "Kernel version: $(grep UTS_RELEASE out/include/generated/utsrelease.h | cut -d'"' -f2)"
+            KVER=$(grep UTS_RELEASE out/include/generated/utsrelease.h | cut -d'"' -f2)
+            echo "Kernel version: $KVER"
+            echo "KVER=$KVER" >> $GITHUB_ENV
+          else
+            echo "KVER=Unknown" >> $GITHUB_ENV
           fi
 
       # ──────────────────────────────────────────────
@@ -382,7 +396,7 @@ jobs:
           echo "::endgroup::"
 
       # ──────────────────────────────────────────────
-      # 7. Upload & Release
+      # 7. Upload & Release to GitHub
       # ──────────────────────────────────────────────
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -403,26 +417,45 @@ jobs:
 
             | Property | Value |
             |----------|-------|
-            | **Kernel** | `${{ inputs.KERNEL_NAME }}` |
-            | **Base Source** | [`${{ inputs.BASE_BRANCH }}`](${{ inputs.BASE_REPO }}) |
+            | **Kernel** | `${{ env.KVER }}` |
+            | **Base Source** | [`${{ inputs.BASE_BRANCH }}`](<${{ inputs.BASE_REPO }}>) |
             | **Upstream Merged** | `${{ inputs.UPSTREAM_TAG || 'none' }}` |
-            | **Merge Strategy** | `${{ inputs.MERGE_STRATEGY }}` |
-            | **KernelSU-Next** | ${{ inputs.ENABLE_KERNELSU_NEXT == true && format('✅ [{0}](https://github.com/pershoot/KernelSU-Next/tree/{0})', inputs.KSU_NEXT_BRANCH) || '❌ Disabled' }} |
-            | **SuSFS** | ${{ inputs.ENABLE_SUSFS == true && '✅ Enabled' || '❌ Disabled' }} |
-            | **LTO** | `${{ inputs.LTO_TYPE }}` |
+            | **KernelSU-Next** | ${{ env.KSU_VER }} |
+            | **SuSFS** | ${{ env.SUSFS_VER }} |
             | **Build** | `#${{ github.run_number }}` |
-            | **Date** | `${{ steps.artifacts.outputs.date_tag }}` |
 
             ### 📥 Flash
             1. Download `zip` below
             2. Flash via **TWRP / EXKM / FKM** atau KernelSU Manager.
             3. Reboot
-
-            ### 📦 Source
-            - **Base**: [${{ inputs.BASE_BRANCH }}](${{ inputs.BASE_REPO }})
-            ${{ inputs.UPSTREAM_TAG != '' && format('- **Upstream**: [`{0}`](https://android.googlesource.com/kernel/common/+/refs/tags/{0})', inputs.UPSTREAM_TAG) || '' }}
-            ${{ inputs.ENABLE_KERNELSU_NEXT == true && format('- **KernelSU-Next**: [pershoot/{0}](https://github.com/pershoot/KernelSU-Next/tree/{0})', inputs.KSU_NEXT_BRANCH) || '' }}
           files: |
             ${{ github.workspace }}/dist/${{ env.ZIP_NAME }}.zip
           draft: false
           prerelease: false
+
+      # ──────────────────────────────────────────────
+      # 8. Send to Telegram
+      # ──────────────────────────────────────────────
+      - name: Send to Telegram
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          if [ -z "$TG_BOT_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then
+            echo "Telegram tokens not set. Skipping upload to Telegram."
+            exit 0
+          fi
+          
+          echo "Sending ZIP to Telegram..."
+          
+          # Buat caption yang simple dan rapi
+          CAPTION="Build Completed
+          Kernel Version: ${{ env.KVER }}
+          Root Manager: KernelSU-Next (${{ env.KSU_VER }})
+          SuSFS Version: ${{ env.SUSFS_VER }}
+          LTO: ${{ inputs.LTO_TYPE }}"
+          
+          # Kirim menggunakan curl
+          curl -F document=@"${{ github.workspace }}/dist/${{ env.ZIP_NAME }}.zip" \
+               -F caption="$CAPTION" \
+               "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument?chat_id=${TG_CHAT_ID}"
