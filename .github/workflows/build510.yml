@@ -218,7 +218,7 @@ jobs:
       - name: Patch KernelSU-Next
         run: |
           echo "KSU_VER=Disabled" >> $GITHUB_ENV
-          echo "SUSFS_VER=Disabled" >> $GITHUB_ENV
+          echo "SUSFS_STATUS=Disabled" >> $GITHUB_ENV
 
           if [ "$ENABLE_KSU" = "true" ]; then
             cd kernel
@@ -289,7 +289,7 @@ jobs:
             echo "✓ SuSFS configs added"
           fi
 
-          echo "SUSFS_VER=1.5.5" >> $GITHUB_ENV
+          echo "SUSFS_STATUS=Enabled" >> $GITHUB_ENV
 
       # ──────────────────────────────────────────────
       # 5. Download toolchain & Build
@@ -303,6 +303,8 @@ jobs:
           echo "::endgroup::"
           echo "Clang version:"
           "$GITHUB_WORKSPACE/toolchain/bin/clang" --version | head -2
+          
+          echo "CLANG_VER=Clang 12 (r416183b)" >> $GITHUB_ENV
 
       - name: Build kernel
         run: |
@@ -358,13 +360,13 @@ jobs:
           fi
 
       # ──────────────────────────────────────────────
-      # 6. Package with AnyKernel3 (MillenniumOSS)
+      # 6. Package with AnyKernel3 (AetheriumAnykernel)
       # ──────────────────────────────────────────────
       - name: Package with AnyKernel3
         id: artifacts
         run: |
-          echo "::group::Packaging with AnyKernel3"
-          git clone --depth=1 https://github.com/MillenniumOSS/AnyKernel3.git anykernel
+          echo "::group::Packaging with AetheriumAnykernel (branch: gki)"
+          git clone --depth=1 -b gki https://github.com/kaminarich/AetheriumAnykernel.git anykernel
           
           if [ ! -f "$GITHUB_WORKSPACE/dist/Image" ]; then
             echo "::error::Image not found, cannot pack AnyKernel3"
@@ -420,8 +422,9 @@ jobs:
             | **Kernel** | `${{ env.KVER }}` |
             | **Base Source** | [`${{ inputs.BASE_BRANCH }}`](<${{ inputs.BASE_REPO }}>) |
             | **Upstream Merged** | `${{ inputs.UPSTREAM_TAG || 'none' }}` |
+            | **Compiler** | `${{ env.CLANG_VER }}` |
             | **KernelSU-Next** | ${{ env.KSU_VER }} |
-            | **SuSFS** | ${{ env.SUSFS_VER }} |
+            | **SuSFS** | ${{ env.SUSFS_STATUS }} |
             | **Build** | `#${{ github.run_number }}` |
 
             ### 📥 Flash
@@ -448,14 +451,13 @@ jobs:
           
           echo "Sending ZIP to Telegram..."
           
-          # Buat caption yang simple dan rapi
           CAPTION="Build Completed
           Kernel Version: ${{ env.KVER }}
+          Compiler: ${{ env.CLANG_VER }}
           Root Manager: KernelSU-Next (${{ env.KSU_VER }})
-          SuSFS Version: ${{ env.SUSFS_VER }}
+          SuSFS: ${{ env.SUSFS_STATUS }}
           LTO: ${{ inputs.LTO_TYPE }}"
           
-          # Kirim menggunakan curl
           curl -F document=@"${{ github.workspace }}/dist/${{ env.ZIP_NAME }}.zip" \
                -F caption="$CAPTION" \
                "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument?chat_id=${TG_CHAT_ID}"
