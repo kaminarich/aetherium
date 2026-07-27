@@ -272,6 +272,12 @@ jobs:
           patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch || {
             echo "::warning::SuSFS patch had issues applying cleanly, some hunks may have failed or already been applied."
           }
+          
+          # Fix set_nameidata arguments (some 5.10 kernels use 3 args instead of 4)
+          echo "::group::Fixing set_nameidata in fs/namei.c"
+          sed -i 's/set_nameidata(nd, old_dfd, fake_filename, NULL)/set_nameidata(nd, old_dfd, fake_filename)/g' fs/namei.c
+          echo "::endgroup::"
+          
           echo "::endgroup::"
           
           DEFCONFIG="arch/arm64/configs/gki_defconfig"
