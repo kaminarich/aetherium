@@ -344,26 +344,21 @@ jobs:
           fi
 
       # ──────────────────────────────────────────────
-      # 6. Upload & Release
+      # 6. Package with AnyKernel3 (MillenniumOSS)
       # ──────────────────────────────────────────────
-      - name: Prepare artifacts
+      - name: Package with AnyKernel3
         id: artifacts
         run: |
-          KERNEL_IMAGE=""
-          for img in Image Image.lz4 Image.gz; do
-            if [ -f "$GITHUB_WORKSPACE/dist/$img" ]; then
-              KERNEL_IMAGE="$GITHUB_WORKSPACE/dist/$img"
-              KERNEL_IMAGE_NAME="$img"
-              break
-            fi
-          done
-
-          if [ -z "$KERNEL_IMAGE" ]; then
-            echo "::error::No kernel image found!"
-            ls -la "$GITHUB_WORKSPACE/dist/" 2>/dev/null || true
+          echo "::group::Packaging with AnyKernel3"
+          git clone --depth=1 https://github.com/MillenniumOSS/AnyKernel3.git anykernel
+          
+          if [ ! -f "$GITHUB_WORKSPACE/dist/Image" ]; then
+            echo "::error::Image not found, cannot pack AnyKernel3"
             exit 1
           fi
 
+          cp "$GITHUB_WORKSPACE/dist/Image" anykernel/Image
+          
           KSU_TAG=""
           if [ "$ENABLE_KSU" = "true" ]; then
             KSU_TAG="-KSU-Next"
@@ -375,25 +370,26 @@ jobs:
           UPSTREAM_LABEL="${UPSTREAM_TAG:-base-only}"
           BUILD_NAME="${KERNEL_NAME}-5.10-${UPSTREAM_LABEL}${KSU_TAG}"
           DATE_TAG=$(date +%Y%m%d)
-          RELEASE_TAG="${BUILD_NAME}-${DATE_TAG}-${GITHUB_RUN_NUMBER}"
+          ZIP_NAME="${BUILD_NAME}-${DATE_TAG}-${GITHUB_RUN_NUMBER}"
 
-          echo "kernel_image=$KERNEL_IMAGE" >> "$GITHUB_OUTPUT"
+          cd anykernel
+          zip -r9 "../dist/${ZIP_NAME}.zip" . --exclude="*.git*" --exclude="README.md" --exclude="*.placeholder"
+          
+          echo "ZIP_NAME=${ZIP_NAME}" >> "$GITHUB_ENV"
           echo "build_name=$BUILD_NAME" >> "$GITHUB_OUTPUT"
-          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "date_tag=$DATE_TAG" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${ZIP_NAME}" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
 
-          SIZE=$(du -h "$KERNEL_IMAGE" | cut -f1)
-          echo "✓ Image: $KERNEL_IMAGE_NAME ($SIZE)"
-          echo "  Build: $BUILD_NAME"
-          echo "  Tag:   $RELEASE_TAG"
-
+      # ──────────────────────────────────────────────
+      # 7. Upload & Release
+      # ──────────────────────────────────────────────
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.artifacts.outputs.build_name }}
+          name: ${{ env.ZIP_NAME }}
           path: |
-            ${{ github.workspace }}/dist/Image
-            ${{ github.workspace }}/dist/Image.lz4
+            ${{ github.workspace }}/dist/${{ env.ZIP_NAME }}.zip
           retention-days: 30
           compression-level: 0
 
@@ -417,14 +413,16 @@ jobs:
             | **Build** | `#${{ github.run_number }}` |
             | **Date** | `${{ steps.artifacts.outputs.date_tag }}` |
 
-
+            ### 📥 Flash
+            1. Download `zip` below
+            2. Flash via **TWRP / EXKM / FKM** atau KernelSU Manager.
+            3. Reboot
 
             ### 📦 Source
             - **Base**: [${{ inputs.BASE_BRANCH }}](${{ inputs.BASE_REPO }})
             ${{ inputs.UPSTREAM_TAG != '' && format('- **Upstream**: [`{0}`](https://android.googlesource.com/kernel/common/+/refs/tags/{0})', inputs.UPSTREAM_TAG) || '' }}
             ${{ inputs.ENABLE_KERNELSU_NEXT == true && format('- **KernelSU-Next**: [pershoot/{0}](https://github.com/pershoot/KernelSU-Next/tree/{0})', inputs.KSU_NEXT_BRANCH) || '' }}
           files: |
-            ${{ github.workspace }}/dist/Image
-            ${{ github.workspace }}/dist/Image.lz4
+            ${{ github.workspace }}/dist/${{ env.ZIP_NAME }}.zip
           draft: false
           prerelease: false
