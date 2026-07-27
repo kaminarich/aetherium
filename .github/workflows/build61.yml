@@ -272,10 +272,10 @@ jobs:
           cp -r "$susfs/50_add_susfs_in_gki-android14-6.1.patch" .
           patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || {
             echo "::warning::SuSFS patch had issues applying cleanly. Injecting missing headers..."
-            grep -q "susfs_def.h" fs/namespace.c || sed -i '1s/^/#include <linux\/susfs_def.h>\nextern bool susfs_is_current_ksu_domain(void);\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n#define CL_COPY_MNT_NS BIT(25)\n/' fs/namespace.c
-            grep -q "susfs_def.h" fs/exec.c || sed -i '1s/^/#include <linux\/susfs_def.h>\n/' fs/exec.c
-            grep -q "susfs_def.h" fs/namei.c || sed -i '1s/^/#include <linux\/susfs_def.h>\nextern bool susfs_is_inode_sus_path(struct inode *inode);\nextern const struct qstr susfs_fake_qstr_name;\n/' fs/namei.c
-            grep -q "susfs_def.h" fs/notify/fdinfo.c || sed -i '1s/^/#include <linux\/susfs_def.h>\n/' fs/notify/fdinfo.c
+            grep -q "susfs_def.h" fs/namespace.c || sed -i '1s/^/#include <linux\/thread_info.h>\n#include <linux\/cred.h>\n#include <linux\/susfs_def.h>\nextern bool susfs_is_current_ksu_domain(void);\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n#define CL_COPY_MNT_NS BIT(25)\n/' fs/namespace.c
+            grep -q "susfs_def.h" fs/exec.c || sed -i '1s/^/#include <linux\/thread_info.h>\n#include <linux\/cred.h>\n#include <linux\/susfs_def.h>\n/' fs/exec.c
+            grep -q "susfs_def.h" fs/namei.c || sed -i '1s/^/#include <linux\/thread_info.h>\n#include <linux\/cred.h>\n#include <linux\/susfs_def.h>\nextern bool susfs_is_inode_sus_path(struct inode *inode);\nextern const struct qstr susfs_fake_qstr_name;\n/' fs/namei.c
+            grep -q "susfs_def.h" fs/notify/fdinfo.c || sed -i '1s/^/#include <linux\/thread_info.h>\n#include <linux\/cred.h>\n#include <linux\/susfs_def.h>\n/' fs/notify/fdinfo.c
           }
           echo "::endgroup::"
           
@@ -319,6 +319,8 @@ jobs:
           export LLVM=1
           export LLVM_IAS=1
           export CROSS_COMPILE=aarch64-linux-gnu-
+          export KCFLAGS="-Wno-error=array-bounds"
+          export KCPPFLAGS="-Wno-error=array-bounds"
 
           echo "::group::Configuring (gki_defconfig)"
           make O=out gki_defconfig
