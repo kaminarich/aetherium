@@ -277,6 +277,13 @@ jobs:
             grep -q "susfs_def.h" fs/namei.c || sed -i '1s/^/#include <linux\/thread_info.h>\n#include <linux\/cred.h>\n#include <linux\/susfs_def.h>\nextern bool susfs_is_inode_sus_path(struct inode *inode);\nextern const struct qstr susfs_fake_qstr_name;\n/' fs/namei.c
             grep -q "susfs_def.h" fs/notify/fdinfo.c || sed -i '1s/^/#include <linux\/thread_info.h>\n#include <linux\/cred.h>\n#include <linux\/susfs_def.h>\n/' fs/notify/fdinfo.c
           }
+          
+          echo "::group::Applying Xiaomi & CRC fixes from build-kamisu"
+          curl -LSs "https://raw.githubusercontent.com/kaminarich/build-kamisu/6.x/kernel-patches/susfs/fix-statfs-crc-mismatch-susfs.patch" | patch -p1 || true
+          curl -LSs "https://raw.githubusercontent.com/kaminarich/build-kamisu/6.x/kernel-patches/susfs/fs_proc_base.c-fix-k6.1.patch" | patch -p1 || true
+          sed -i 's/#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME/#if 0 \/\* CONFIG_KSU_SUSFS_SPOOF_UNAME Disabled to fix build \*\//g' drivers/kernelsu/supercalls.c || true
+          echo "::endgroup::"
+          
           echo "::endgroup::"
           
           DEFCONFIG="arch/arm64/configs/gki_defconfig"
