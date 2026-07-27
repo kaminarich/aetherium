@@ -21,7 +21,7 @@ on:
       UPSTREAM_TAG:
         description: "Google upstream tag to merge (leave empty to skip merge)"
         required: false
-        default: "android14-6.1-2026-06_r4"
+        default: "android14-6.1-2026-03_r18"
 
       MERGE_STRATEGY:
         description: "How to handle merge conflicts"
@@ -161,7 +161,6 @@ jobs:
                 --no-edit \
                 -m "Merge upstream ${UPSTREAM_TAG} into ${BASE_BRANCH} (auto: theirs)" || {
                   echo "::warning::Merge had issues, attempting to resolve remaining conflicts..."
-                  # Force-resolve any remaining conflicts by accepting theirs
                   git diff --name-only --diff-filter=U | while read f; do
                     echo "  Resolving: $f (accepting upstream)"
                     git checkout --theirs "$f" 2>/dev/null && git add "$f" || true
@@ -347,7 +346,10 @@ jobs:
           esac
 
           echo "::group::Compiling kernel"
-          make O=out -j"$(nproc --all)" Image
+          make O=out -j"$(nproc --all)" Image 2>&1 | tee build.log || {
+            echo "::error::Build failed! Check build.log."
+            exit 1
+          }
           echo "::endgroup::"
 
           # Copy output
@@ -426,7 +428,7 @@ jobs:
             | Property | Value |
             |----------|-------|
             | **Kernel** | `${{ env.KVER }}` |
-            | **Base Source** | [`${{ inputs.BASE_BRANCH }}`](<${{ inputs.BASE_REPO }}>) |
+            | **Base Source** | [`${{ inputs.BASE_BRANCH }}`](${{ inputs.BASE_REPO }}) |
             | **Upstream Merged** | `${{ inputs.UPSTREAM_TAG || 'none' }}` |
             | **KernelSU-Next** | ${{ env.KSU_VER }} |
             | **SuSFS** | ${{ env.SUSFS_VER }} |
@@ -465,3 +467,42 @@ jobs:
           curl -F document=@"${{ github.workspace }}/dist/${{ env.ZIP_NAME }}.zip" \
                -F caption="$CAPTION" \
                "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument?chat_id=${TG_CHAT_ID}"
+
+      # ──────────────────────────────────────────────
+      # 9. Send Error to Telegram (On Failure)
+      # ──────────────────────────────────────────────
+      - name: Send Error Log to Telegram
+        if: failure()
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          if [ -z "$TG_BOT_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then
+            echo "Telegram tokens not set."
+            exit 0
+          fi
+          
+          echo "Build Failed! Sending log to Telegram..."
+          
+          # Extract the last 150 lines of the build log and any specific errors
+          ERROR_LOG="error_log.txt"
+          if [ -f kernel/build.log ]; then
+            echo "=== LAST 150 LINES OF LOG ===" > $ERROR_LOG
+            tail -n 150 kernel/build.log >> $ERROR_LOG
+            echo "" >> $ERROR_LOG
+            echo "=== FILTERED ERRORS ===" >> $ERROR_LOG
+            grep -iE "error:|warning:|undefined reference" kernel/build.log | tail -n 50 >> $ERROR_LOG
+          else
+            echo "Log file not found. Error happened before compilation." > $ERROR_LOG
+          fi
+          
+          CAPTION="🚨 <b>BUILD FAILED!</b> 🚨
+          <b>Kernel:</b> ${{ inputs.KERNEL_NAME }} (6.1)
+          <b>Upstream:</b> ${{ inputs.UPSTREAM_TAG || 'none' }}
+          <b>Action:</b> <a href=\"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\">View Action Logs</a>"
+          
+          curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
+            -F chat_id="${TG_CHAT_ID}" \
+            -F document=@"$ERROR_LOG" \
+            -F caption="$CAPTION" \
+            -F parse_mode="HTML"
