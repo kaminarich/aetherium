@@ -39,6 +39,12 @@ on:
         type: boolean
         default: true
 
+      ENABLE_SUSFS:
+        description: "Patch SuSFS for KernelSU-Next"
+        required: true
+        type: boolean
+        default: true
+
       KSU_NEXT_BRANCH:
         description: "KernelSU-Next branch"
         required: false
@@ -68,6 +74,7 @@ jobs:
       UPSTREAM_TAG: ${{ inputs.UPSTREAM_TAG }}
       MERGE_STRATEGY: ${{ inputs.MERGE_STRATEGY || 'theirs-auto' }}
       ENABLE_KSU: ${{ inputs.ENABLE_KERNELSU_NEXT }}
+      ENABLE_SUSFS: ${{ inputs.ENABLE_SUSFS }}
       KSU_BRANCH: ${{ inputs.KSU_NEXT_BRANCH || 'dev-susfs' }}
       LTO: ${{ inputs.LTO_TYPE || 'thin' }}
 
@@ -89,7 +96,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            bc bison build-essential ccache curl flex git gnupg gperf \
+            bc bison build-essential ccache curl dwarves flex git gnupg gperf \
             libelf-dev libncurses5-dev libssl-dev lz4 python3 \
             python-is-python3 rsync zip unzip jq
 
@@ -209,11 +216,12 @@ jobs:
           fi
 
       # ──────────────────────────────────────────────
-      # 4. Patch KernelSU-Next
+      # 4. Patch KernelSU-Next & SuSFS
       # ──────────────────────────────────────────────
       - name: Patch KernelSU-Next
         run: |
           echo "KSU_VER=Disabled" >> $GITHUB_ENV
+          echo "SUSFS_VER=Disabled" >> $GITHUB_ENV
           
           if [ "$ENABLE_KSU" = "true" ]; then
             cd kernel
@@ -251,6 +259,40 @@ jobs:
             cd ..
           fi
 
+      - name: Patch SuSFS for 6.1
+        if: inputs.ENABLE_KERNELSU_NEXT == true && inputs.ENABLE_SUSFS == true
+        run: |
+          cd kernel
+          
+          echo "::group::Integrating SuSFS for 6.1"
+          git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android14-6.1 sus
+          rm -rf sus/.git
+          susfs="sus/kernel_patches"
+          cp -r "$susfs/fs" .
+          cp -r "$susfs/include" .
+          cp -r "$susfs/50_add_susfs_in_gki-android14-6.1.patch" .
+          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || {
+            echo "::warning::SuSFS patch had issues applying cleanly, some hunks may have failed or already been applied."
+          }
+          echo "::endgroup::"
+          
+          DEFCONFIG="arch/arm64/configs/gki_defconfig"
+          if [ -f "$DEFCONFIG" ]; then
+            echo "CONFIG_KSU_SUSFS=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> "$DEFCONFIG"
+            echo "✓ SuSFS configs added"
+          fi
+
+          echo "SUSFS_VER=1.5.5" >> $GITHUB_ENV
+
       # ──────────────────────────────────────────────
       # 5. Download toolchain & Build
       # ──────────────────────────────────────────────
@@ -277,6 +319,12 @@ jobs:
 
           echo "::group::Configuring (gki_defconfig)"
           make O=out gki_defconfig
+          
+          # Fix BTF error by disabling it
+          echo "::group::Disabling BTF to fix pahole error"
+          scripts/config --file out/.config -d DEBUG_INFO_BTF
+          make O=out olddefconfig
+          echo "::endgroup::"
           echo "::endgroup::"
 
           case "$LTO" in
@@ -318,13 +366,13 @@ jobs:
           fi
 
       # ──────────────────────────────────────────────
-      # 6. Package with AnyKernel3 (MillenniumOSS)
+      # 6. Package with AnyKernel3
       # ──────────────────────────────────────────────
       - name: Package with AnyKernel3
         id: artifacts
         run: |
-          echo "::group::Packaging with AnyKernel3"
-          git clone --depth=1 https://github.com/MillenniumOSS/AnyKernel3.git anykernel
+          echo "::group::Packaging with AetheriumAnykernel (branch: gki)"
+          git clone --depth=1 -b gki https://github.com/kaminarich/AetheriumAnykernel.git anykernel
           
           if [ ! -f "$GITHUB_WORKSPACE/dist/Image" ]; then
             echo "::error::Image not found, cannot pack AnyKernel3"
@@ -336,6 +384,9 @@ jobs:
           KSU_TAG=""
           if [ "$ENABLE_KSU" = "true" ]; then
             KSU_TAG="-KSU-Next"
+            if [ "$ENABLE_SUSFS" = "true" ]; then
+              KSU_TAG="-KSU-Next-SuSFS"
+            fi
           fi
 
           UPSTREAM_LABEL="${UPSTREAM_TAG:-base-only}"
@@ -378,6 +429,7 @@ jobs:
             | **Base Source** | [`${{ inputs.BASE_BRANCH }}`](<${{ inputs.BASE_REPO }}>) |
             | **Upstream Merged** | `${{ inputs.UPSTREAM_TAG || 'none' }}` |
             | **KernelSU-Next** | ${{ env.KSU_VER }} |
+            | **SuSFS** | ${{ env.SUSFS_VER }} |
             | **Build** | `#${{ github.run_number }}` |
 
             ### 📥 Flash
@@ -407,6 +459,7 @@ jobs:
           CAPTION="Build Completed
           Kernel Version: ${{ env.KVER }}
           Root Manager: KernelSU-Next (${{ env.KSU_VER }})
+          SuSFS Version: ${{ env.SUSFS_VER }}
           LTO: ${{ inputs.LTO_TYPE }}"
           
           curl -F document=@"${{ github.workspace }}/dist/${{ env.ZIP_NAME }}.zip" \
