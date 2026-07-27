@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════
-#  Aetherium 5.10 GKI Kernel Builder (XTENSEI Edition)
-#  Clone from XTENSEI base → Merge upstream → Patch KSU/SuSFS → Build → AK3
+#  Aetherium 5.10 GKI Kernel Builder
+#  Clone from working base → Merge upstream → Patch KSU/SuSFS → Build
 #
 #  Usage: ./5.10.sh [OPTIONS]
 # ═══════════════════════════════════════════════════════════
@@ -9,7 +9,7 @@ set -e
 
 # ── Defaults ───────────────────────────────────────────────
 KERNEL_NAME="${KERNEL_NAME:-Aetherium}"
-BASE_REPO="${BASE_REPO:-https://github.com/XTENSEI/kernel_common_5.10.git}"
+BASE_REPO="${BASE_REPO:-https://github.com/ramabondanp/android_kernel_common-5.10.git}"
 BASE_BRANCH="${BASE_BRANCH:-android12-5.10}"
 UPSTREAM_TAG="${UPSTREAM_TAG:-}"
 MERGE_STRATEGY="${MERGE_STRATEGY:-theirs-auto}"
@@ -38,7 +38,7 @@ ${BOLD}Usage:${NC}
 
 ${BOLD}Options:${NC}
     -n, --name NAME           Kernel name (default: Aetherium)
-    -r, --repo URL            Base repo URL (default: XTENSEI/kernel_common_5.10)
+    -r, --repo URL            Base repo URL (default: ramabondanp/android_kernel_common-5.10)
     -b, --branch BRANCH       Base repo branch (default: android12-5.10)
     -u, --upstream TAG        Google upstream tag to merge (e.g. android12-5.10-2023-10_r2)
     -m, --merge-strategy STR  theirs-auto | ours-auto | fail-on-conflict (default: theirs-auto)
@@ -111,7 +111,7 @@ install_deps() {
     sudo apt-get install -y --no-install-recommends \
         bc bison build-essential ccache curl flex git gnupg gperf \
         libelf-dev libncurses5-dev libssl-dev lz4 python3 \
-        python-is-python3 rsync zip unzip jq wget binutils zstd
+        python-is-python3 rsync zip unzip jq
     log "Dependencies installed"
 }
 
@@ -136,7 +136,7 @@ KERNEL_DIR="$WORKDIR/kernel"
 if [ -d "$KERNEL_DIR/.git" ]; then
     info "Kernel source already exists, pulling latest..."
     cd "$KERNEL_DIR"
-    git fetch origin "$BASE_BRANCH"
+    git fetch origin "$BASE_BRANCH" --depth=50
     git reset --hard "origin/$BASE_BRANCH"
 else
     info "Cloning base kernel: $BASE_REPO ($BASE_BRANCH)..."
@@ -308,11 +308,6 @@ export LLVM=1
 export LLVM_IAS=1
 export CROSS_COMPILE=aarch64-linux-gnu-
 
-export KBUILD_BUILD_USER="kaminarich"
-export KBUILD_BUILD_HOST="Aetherium-Builder"
-export KCFLAGS="-w -march=armv8.2-a+crypto+fp16+dotprod -mtune=cortex-a55 -fno-semantic-interposition"
-
-
 info "Configuring kernel (gki_defconfig)..."
 make O=out gki_defconfig
 
@@ -321,8 +316,7 @@ case "$LTO" in
         info "Applying LTO=thin..."
         scripts/config --file out/.config \
             -e LTO_CLANG -e LTO_CLANG_THIN \
-            -d LTO_NONE -d LTO_CLANG_FULL \
-            -e THINLTO
+            -d LTO_NONE -d LTO_CLANG_FULL
         make O=out olddefconfig
         ;;
     full)
@@ -353,22 +347,6 @@ if [ -f out/include/generated/utsrelease.h ]; then
     log "Kernel version: $KVER"
 fi
 
-
-# ═══════════════════════════════════════════════════════════
-# STEP 9: Package with AnyKernel3 (XTENSEI)
-# ═══════════════════════════════════════════════════════════
-info "Packaging with AnyKernel3..."
-cd "$WORKDIR"
-git clone --depth=1 https://github.com/XTENSEI/GrayRavens-anykernel anykernel
-
-cp "$DIST_DIR/Image" anykernel/Image
-
-cd anykernel
-ZIP_NAME="${KERNEL_NAME}-5.10-AK3.zip"
-zip -r9 "../dist/$ZIP_NAME" . --exclude="*.git*" --exclude="README.md" --exclude="*.placeholder"
-
-log "AK3 Zip created: $ZIP_NAME"
-
 # ═══════════════════════════════════════════════════════════
 # Done!
 # ═══════════════════════════════════════════════════════════
@@ -380,5 +358,5 @@ echo ""
 echo "Output files:"
 ls -lh "$DIST_DIR/" 2>/dev/null || echo "  (no files found)"
 echo ""
-echo -e "Flash with: ${CYAN}KernelSU Manager App${NC} or ${CYAN}TWRP / EXKM${NC}"
+echo -e "Flash with: ${CYAN}KernelSU Manager App${NC} or ${CYAN}fastboot flash boot Image${NC}"
 echo ""
