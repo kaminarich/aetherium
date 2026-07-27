@@ -11,7 +11,7 @@ on:
       BASE_REPO:
         description: "Base kernel repo (known working source)"
         required: true
-        default: "https://github.com/ramabondanp/android_kernel_common-5.10.git"
+        default: "https://github.com/XTENSEI/kernel_common_5.10.git"
 
       BASE_BRANCH:
         description: "Base repo branch"
@@ -98,7 +98,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             bc bison build-essential ccache curl flex git gnupg gperf \
             libelf-dev libncurses5-dev libssl-dev lz4 python3 \
-            python-is-python3 rsync zip unzip jq
+            python-is-python3 rsync zip unzip jq wget binutils zstd
 
       - name: Setup swap
         run: |
@@ -122,7 +122,7 @@ jobs:
       - name: Clone base kernel
         run: |
           echo "::group::Cloning base kernel: $BASE_REPO ($BASE_BRANCH)"
-          git clone --branch "$BASE_BRANCH" "$BASE_REPO" kernel
+          git clone --depth=1 --branch "$BASE_BRANCH" "$BASE_REPO" kernel
           echo "::endgroup::"
           cd kernel
           echo "Base HEAD: $(git log --oneline -1)"
@@ -141,6 +141,8 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Fetching upstream tag: $UPSTREAM_TAG"
+          # Unshallow so merge has history
+          git fetch --unshallow origin "$BASE_BRANCH" || true
           git fetch google "refs/tags/${UPSTREAM_TAG}:refs/tags/${UPSTREAM_TAG}" || {
             echo "::error::Failed to fetch tag $UPSTREAM_TAG from Google. Check if tag exists."
             exit 1
@@ -231,22 +233,7 @@ jobs:
             echo "CONFIG_KSU=y" >> "$DEFCONFIG"
             echo "CONFIG_KSU_MANUAL_SU=n" >> "$DEFCONFIG"
             echo "CONFIG_KSU_KPROBE_HOOKS=y" >> "$DEFCONFIG"
-            
-            echo "" >> "$DEFCONFIG"
-            echo "# Required for KSU" >> "$DEFCONFIG"
-            echo "CONFIG_OVERLAY_FS=y" >> "$DEFCONFIG"
-            echo "CONFIG_KPROBES=y" >> "$DEFCONFIG"
-            echo "CONFIG_HAVE_KPROBES=y" >> "$DEFCONFIG"
-            echo "CONFIG_KPROBE_EVENTS=y" >> "$DEFCONFIG"
-            echo "CONFIG_TMPFS_XATTR=y" >> "$DEFCONFIG"
-            echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$DEFCONFIG"
-            
             echo "✓ KSU configs added"
-          fi
-
-          if [ ! -d "drivers/kernelsu" ]; then
-            echo "::error::KernelSU-Next integration failed"
-            exit 1
           fi
 
       - name: Patch SuSFS for 5.10
@@ -304,6 +291,11 @@ jobs:
           export LLVM=1
           export LLVM_IAS=1
           export CROSS_COMPILE=aarch64-linux-gnu-
+          export KBUILD_BUILD_USER="kaminarich"
+          export KBUILD_BUILD_HOST="Aetherium-Builder"
+
+          # KCFLAGS setup from XTENSEI
+          export KCFLAGS="-w -march=armv8.2-a+crypto+fp16+dotprod -mtune=cortex-a55 -fno-semantic-interposition"
 
           echo "::group::Configuring (gki_defconfig)"
           make O=out gki_defconfig
@@ -314,7 +306,8 @@ jobs:
               echo "::group::Applying LTO=thin"
               scripts/config --file out/.config \
                 -e LTO_CLANG -e LTO_CLANG_THIN \
-                -d LTO_NONE -d LTO_CLANG_FULL
+                -d LTO_NONE -d LTO_CLANG_FULL \
+                -e THINLTO
               make O=out olddefconfig
               echo "::endgroup::"
               ;;
@@ -338,32 +331,21 @@ jobs:
           echo "── Build output ──"
           ls -lh "$GITHUB_WORKSPACE/dist/"
 
-          # Print kernel version
-          if [ -f out/include/generated/utsrelease.h ]; then
-            echo "Kernel version: $(grep UTS_RELEASE out/include/generated/utsrelease.h | cut -d'"' -f2)"
-          fi
-
       # ──────────────────────────────────────────────
-      # 6. Upload & Release
+      # 6. Package with AnyKernel3 (XTENSEI)
       # ──────────────────────────────────────────────
-      - name: Prepare artifacts
-        id: artifacts
+      - name: Package with AnyKernel3
         run: |
-          KERNEL_IMAGE=""
-          for img in Image Image.lz4 Image.gz; do
-            if [ -f "$GITHUB_WORKSPACE/dist/$img" ]; then
-              KERNEL_IMAGE="$GITHUB_WORKSPACE/dist/$img"
-              KERNEL_IMAGE_NAME="$img"
-              break
-            fi
-          done
-
-          if [ -z "$KERNEL_IMAGE" ]; then
-            echo "::error::No kernel image found!"
-            ls -la "$GITHUB_WORKSPACE/dist/" 2>/dev/null || true
+          echo "::group::Packaging with AnyKernel3"
+          git clone --depth=1 https://github.com/XTENSEI/GrayRavens-anykernel anykernel
+          
+          if [ ! -f "$GITHUB_WORKSPACE/dist/Image" ]; then
+            echo "::error::Image not found, cannot pack AnyKernel3"
             exit 1
           fi
 
+          cp "$GITHUB_WORKSPACE/dist/Image" anykernel/Image
+          
           KSU_TAG=""
           if [ "$ENABLE_KSU" = "true" ]; then
             KSU_TAG="-KSU-Next"
@@ -375,25 +357,27 @@ jobs:
           UPSTREAM_LABEL="${UPSTREAM_TAG:-base-only}"
           BUILD_NAME="${KERNEL_NAME}-5.10-${UPSTREAM_LABEL}${KSU_TAG}"
           DATE_TAG=$(date +%Y%m%d)
-          RELEASE_TAG="${BUILD_NAME}-${DATE_TAG}-${GITHUB_RUN_NUMBER}"
+          ZIP_NAME="${BUILD_NAME}-${DATE_TAG}-${GITHUB_RUN_NUMBER}"
 
-          echo "kernel_image=$KERNEL_IMAGE" >> "$GITHUB_OUTPUT"
+          cd anykernel
+          zip -r9 "../dist/${ZIP_NAME}.zip" . --exclude="*.git*" --exclude="README.md" --exclude="*.placeholder"
+          
+          echo "ZIP_NAME=${ZIP_NAME}" >> "$GITHUB_ENV"
           echo "build_name=$BUILD_NAME" >> "$GITHUB_OUTPUT"
-          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "date_tag=$DATE_TAG" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${ZIP_NAME}" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
+        id: artifacts
 
-          SIZE=$(du -h "$KERNEL_IMAGE" | cut -f1)
-          echo "✓ Image: $KERNEL_IMAGE_NAME ($SIZE)"
-          echo "  Build: $BUILD_NAME"
-          echo "  Tag:   $RELEASE_TAG"
-
+      # ──────────────────────────────────────────────
+      # 7. Upload & Release
+      # ──────────────────────────────────────────────
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.artifacts.outputs.build_name }}
+          name: ${{ env.ZIP_NAME }}
           path: |
-            ${{ github.workspace }}/dist/Image
-            ${{ github.workspace }}/dist/Image.lz4
+            ${{ github.workspace }}/dist/${{ env.ZIP_NAME }}.zip
           retention-days: 30
           compression-level: 0
 
@@ -410,21 +394,16 @@ jobs:
             | **Kernel** | `${{ inputs.KERNEL_NAME }}` |
             | **Base Source** | [`${{ inputs.BASE_BRANCH }}`](${{ inputs.BASE_REPO }}) |
             | **Upstream Merged** | `${{ inputs.UPSTREAM_TAG || 'none' }}` |
-            | **Merge Strategy** | `${{ inputs.MERGE_STRATEGY }}` |
             | **KernelSU-Next** | ${{ inputs.ENABLE_KERNELSU_NEXT == true && format('✅ [{0}](https://github.com/pershoot/KernelSU-Next/tree/{0})', inputs.KSU_NEXT_BRANCH) || '❌ Disabled' }} |
             | **SuSFS** | ${{ inputs.ENABLE_SUSFS == true && '✅ Enabled' || '❌ Disabled' }} |
             | **LTO** | `${{ inputs.LTO_TYPE }}` |
             | **Build** | `#${{ github.run_number }}` |
             | **Date** | `${{ steps.artifacts.outputs.date_tag }}` |
 
-
-
-            ### 📦 Source
-            - **Base**: [${{ inputs.BASE_BRANCH }}](${{ inputs.BASE_REPO }})
-            ${{ inputs.UPSTREAM_TAG != '' && format('- **Upstream**: [`{0}`](https://android.googlesource.com/kernel/common/+/refs/tags/{0})', inputs.UPSTREAM_TAG) || '' }}
-            ${{ inputs.ENABLE_KERNELSU_NEXT == true && format('- **KernelSU-Next**: [pershoot/{0}](https://github.com/pershoot/KernelSU-Next/tree/{0})', inputs.KSU_NEXT_BRANCH) || '' }}
+            ### 📥 Flash
+            1. Download `zip` below
+            2. Flash via **KernelSU Manager**, TWRP, atau EXKM.
           files: |
-            ${{ github.workspace }}/dist/Image
-            ${{ github.workspace }}/dist/Image.lz4
+            ${{ github.workspace }}/dist/${{ env.ZIP_NAME }}.zip
           draft: false
           prerelease: false
