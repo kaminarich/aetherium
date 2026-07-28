@@ -92,14 +92,8 @@ jobs:
             libelf-dev libncurses5-dev libssl-dev lz4 python3 \
             python-is-python3 rsync zip unzip jq zstd
 
-      - name: Setup swap
+      - name: Check Storage
         run: |
-          sudo swapoff -a 2>/dev/null || true
-          sudo rm -f /swapfile /mnt/swapfile 2>/dev/null || true
-          sudo fallocate -l 8G /mnt/swapfile
-          sudo chmod 600 /mnt/swapfile
-          sudo mkswap /mnt/swapfile
-          sudo swapon /mnt/swapfile
           free -h
 
       - name: Configure git
