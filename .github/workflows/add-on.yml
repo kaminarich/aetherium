@@ -324,6 +324,10 @@ jobs:
           export LUMINAIRE_PATCH_DIR="$GITHUB_WORKSPACE"
           export ROOT_DIR="$GITHUB_WORKSPACE"
           
+          # Fix hardcoded paths in the scripts dynamically so they don't look for /kernel/addons/
+          find "$GITHUB_WORKSPACE/add-on/addons" -type f -name "*.sh" -exec sed -i 's|/kernel/addons/|/add-on/addons/|g' {} +
+          find "$GITHUB_WORKSPACE/add-on/addons" -type f -name "*.sh" -exec sed -i 's|/kernel/patches/|/add-on/patches/|g' {} +
+          
           function log() { echo "✅ $1"; }
           export -f log
           function error() { echo "❌ $1"; exit 1; }
