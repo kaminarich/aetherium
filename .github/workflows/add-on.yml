@@ -1,4 +1,4 @@
-name: Build 5.10 Kernel (Neutron Clang)
+name: Build 5.10 Kernel + addon (Neutron Clang)
 
 on:
   workflow_dispatch:
