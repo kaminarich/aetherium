@@ -223,7 +223,7 @@ jobs:
           if [ -f "$DEFCONFIG" ]; then
             sed -i '/^CONFIG_LOCALVERSION=/d' "$DEFCONFIG"
             sed -i '/^CONFIG_LOCALVERSION_AUTO=/d' "$DEFCONFIG"
-            echo "CONFIG_LOCALVERSION="-$KERNEL_NAME"" >> "$DEFCONFIG"
+            echo "CONFIG_LOCALVERSION=\"-${KERNEL_NAME}\"" >> "$DEFCONFIG"
             echo "CONFIG_LOCALVERSION_AUTO=n" >> "$DEFCONFIG"
             echo "✓ Kernel name: -$KERNEL_NAME"
           fi
@@ -332,16 +332,16 @@ jobs:
           export -f warn
 
           if [ "${{ inputs.ENABLE_BBRV3 }}" = "true" ]; then
-            bash "$GITHUB_WORKSPACE/kernel/addons/bbrv3/bbrv3.sh"
+            bash "$GITHUB_WORKSPACE/add-on/addons/bbrv3/bbrv3.sh"
           fi
           if [ "${{ inputs.ENABLE_DROIDSPACES }}" = "true" ]; then
-            bash "$GITHUB_WORKSPACE/kernel/addons/droidspaces/droidspaces.sh"
+            bash "$GITHUB_WORKSPACE/add-on/addons/droidspaces/droidspaces.sh"
           fi
           if [ "${{ inputs.ENABLE_LZ4KD }}" = "true" ]; then
-            bash "$GITHUB_WORKSPACE/kernel/addons/lz4kd/lz4kd.sh"
+            bash "$GITHUB_WORKSPACE/add-on/addons/lz4kd/lz4kd.sh"
           fi
           if [ "${{ inputs.ENABLE_NTSYNC }}" = "true" ]; then
-            bash "$GITHUB_WORKSPACE/kernel/addons/ntsync/ntsync.sh"
+            bash "$GITHUB_WORKSPACE/add-on/addons/ntsync/ntsync.sh"
           fi
 
       # ──────────────────────────────────────────────
@@ -551,7 +551,7 @@ jobs:
           <b>Kernel:</b> ${{ inputs.KERNEL_NAME }} (5.10)
           <b>Compiler:</b> ${{ env.CLANG_VER }}
           <b>Upstream:</b> ${{ inputs.UPSTREAM_TAG || 'none' }}
-          <b>Action:</b> <a href="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}">View Action Logs</a>"
+          <b>Action:</b> <a href=\"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\">View Action Logs</a>"
 
           curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
             -F chat_id="${TG_CHAT_ID}" \
