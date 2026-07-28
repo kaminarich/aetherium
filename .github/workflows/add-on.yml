@@ -328,6 +328,9 @@ jobs:
           find "$GITHUB_WORKSPACE/add-on/addons" -type f -name "*.sh" -exec sed -i 's|/kernel/addons/|/add-on/addons/|g' {} +
           find "$GITHUB_WORKSPACE/add-on/addons" -type f -name "*.sh" -exec sed -i 's|/kernel/patches/|/add-on/patches/|g' {} +
           
+          # Fix stray backtick typo in droidspaces.sh caused by the migration!
+          sed -i 's/\`\$LUMINAIRE/\$LUMINAIRE/g' "$GITHUB_WORKSPACE/add-on/addons/droidspaces/droidspaces.sh" 2>/dev/null || true
+          
           function log() { echo "✅ $1"; }
           export -f log
           function error() { echo "❌ $1"; exit 1; }
