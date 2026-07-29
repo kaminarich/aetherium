@@ -332,14 +332,14 @@ jobs:
           # 2. Hancurkan backtick nyasar di droidspaces.sh
           sed -i 's/^KABI_PATCH=.*/KABI_PATCH="$LUMINAIRE_PATCH_DIR\/add-on\/patches\/001_GKI-below-6_12-fix_sysvipc_kabi_6_7_8.patch"/g' "$GITHUB_WORKSPACE/add-on/addons/droidspaces/droidspaces.sh" 2>/dev/null || true
           
-          # 3. Mencegah infinite hang: Paksa semua curl agar timeout maksimal 15 detik
+          # 3. FIX HARDCODE 6.1 DI LZ4KD.SH! Ubah 6.1 menjadi versi kernel aktual yang dibuild
+          sed -i 's|/zram_patch/6.1/|/zram_patch/${KERNEL_VERSION}/|g' "$GITHUB_WORKSPACE/add-on/addons/lz4kd/lz4kd.sh" 2>/dev/null || true
+          
+          # 4. Mencegah infinite hang: Paksa semua curl agar timeout maksimal 15 detik
           find "$GITHUB_WORKSPACE/add-on/addons" -type f -name "*.sh" -exec sed -i 's/curl -LSs /curl -LSs -m 15 /g' {} +
           
-          # 4. Mencegah stuck: Paksa semua command patch memakai --batch
+          # 5. Mencegah stuck: Paksa semua command patch memakai --batch
           find "$GITHUB_WORKSPACE/add-on/addons" -type f -name "*.sh" -exec sed -i 's/patch -p1/patch -p1 --batch/g' {} +
-          
-          # 5. Aktifkan set -x supaya jika ada error, kita bisa melihat persis syntax/baris mana yang gagal
-          find "$GITHUB_WORKSPACE/add-on/addons" -type f -name "*.sh" -exec sed -i '2i set -x' {} +
           echo "::endgroup::"
           
           function log() { echo "✅ $1"; }
