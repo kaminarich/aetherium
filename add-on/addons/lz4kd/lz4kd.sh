@@ -5,13 +5,10 @@
 # ======================================================
 # Source: https://github.com/SukiSU-Ultra/SukiSU_patch (other/zram/)
 # ======================================================
-# Adds the lz4k/lz4kd compressor backends for zram (kernel-delta-aware
-# variants of LZ4) plus the Kconfig/Makefile/zcomp.c wiring to register
-# them. Version-keyed by upstream per kernel branch — this repo only
-# targets android14-6.1-lts, so only that one path is used below; add a
-# case statement here if a second kernel version is ever supported.
 
 LZ4KD_RAW_BASE="https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU_patch/main/other/zram"
+# Target version otomatis baca environment KERNEL_VERSION dari workflow (default 6.1 kalau kosong)
+TARGET_VER="${KERNEL_VERSION:-6.1}"
 
 cd "${KERNEL_SRC}"
 
@@ -38,23 +35,28 @@ LZ4KD_FILES=(
 
 for f in "${LZ4KD_FILES[@]}"; do
     mkdir -p "$(dirname "$f")"
-    curl -LSs --fail --retry 3 --retry-all-errors --connect-timeout 30 \
+    curl -LSs -m 15 --fail --retry 3 --retry-all-errors \
         -o "$f" "${LZ4KD_RAW_BASE}/lz4k/${f}" \
         || error "LZ4KD: failed to download ${f}!"
 done
 
 log "LZ4KD source files staged ✅"
 
-LZ4KD_PATCH=$(curl -LSs --fail --retry 3 --retry-all-errors --connect-timeout 30 \
-    "${LZ4KD_RAW_BASE}/zram_patch/6.1/lz4kd.patch") \
+# Ambil patch sesuai dengan versi kernel-nya (misal: 5.10 atau 6.1)
+LZ4KD_PATCH=$(curl -LSs -m 15 --fail --retry 3 --retry-all-errors \
+    "${LZ4KD_RAW_BASE}/zram_patch/${TARGET_VER}/lz4kd.patch") \
     || error "LZ4KD: failed to download lz4kd.patch!"
 
 [ -n "$LZ4KD_PATCH" ] || error "LZ4KD: downloaded patch is empty!"
 
-if echo "$LZ4KD_PATCH" | patch -p1 --fuzz=3 --dry-run --reverse --no-backup-if-mismatch > /dev/null 2>&1; then
+# FIX OPLUS CONFLICT: SukiSU's patch contains an OPLUS-specific module blacklist hack in kernel/module.c
+# which causes conflicts on standard GKI kernels. We slice it off dynamically!
+LZ4KD_PATCH=$(echo "$LZ4KD_PATCH" | awk '/^diff -u a\/kernel\/module.c/{exit} {print}')
+
+if echo "$LZ4KD_PATCH" | patch -p1 --batch --fuzz=3 --dry-run --reverse --no-backup-if-mismatch > /dev/null 2>&1; then
     log "LZ4KD: patch already applied, skipping."
-elif echo "$LZ4KD_PATCH" | patch -p1 --fuzz=3 --dry-run --forward --no-backup-if-mismatch > /dev/null 2>&1; then
-    echo "$LZ4KD_PATCH" | patch -p1 --fuzz=3 --forward --no-backup-if-mismatch \
+elif echo "$LZ4KD_PATCH" | patch -p1 --batch --fuzz=3 --dry-run --forward --no-backup-if-mismatch > /dev/null 2>&1; then
+    echo "$LZ4KD_PATCH" | patch -p1 --batch --fuzz=3 --forward --no-backup-if-mismatch \
         || error "LZ4KD: patch apply failed!"
     log "LZ4KD: patch applied ✅"
 else
@@ -64,20 +66,6 @@ fi
 # ------------------------------------------------------
 # Force lz4kd to win over vendor init.rc comp_algorithm races
 # ------------------------------------------------------
-# Confirmed on-device: CONFIG_ZRAM_DEF_COMP="lz4kd" compiles in fine, but
-# /sys/block/zram0/comp_algorithm still came up [lz4] after boot. Root
-# cause: some OEM vendor init.rc scripts `write comp_algorithm <algo>`
-# during early boot — legal, since comp_algorithm_store() only refuses
-# writes *after* init_done(zram) is true (drivers/block/zram/zram_drv.c).
-# That write silently wins over our Kconfig default because it lands
-# after zram_add() sets it but before disksize_store() locks it in for
-# good — no boot-time retry loop can fix this after the fact (once
-# init_done, comp_algorithm_store() flatly returns -EBUSY), so the only
-# correct place to win the race is one line, inside disksize_store()
-# itself, right before zcomp_create() — the true last point before the
-# choice becomes permanent. Gated on CONFIG_ZRAM_DEF_COMP_LZ4KD, which is
-# already auto-set by the defconfig line below, so it stays inert if the
-# default is ever changed away from lz4kd.
 ZRAM_FORCE_DEFAULT_PATCH=$(cat << 'PATCHEOF'
 --- a/drivers/block/zram/zram_drv.c
 +++ b/drivers/block/zram/zram_drv.c
@@ -104,10 +92,10 @@ ZRAM_FORCE_DEFAULT_PATCH=$(cat << 'PATCHEOF'
 PATCHEOF
 )
 
-if echo "$ZRAM_FORCE_DEFAULT_PATCH" | patch -p1 --fuzz=3 --dry-run --reverse --no-backup-if-mismatch > /dev/null 2>&1; then
+if echo "$ZRAM_FORCE_DEFAULT_PATCH" | patch -p1 --batch --fuzz=3 --dry-run --reverse --no-backup-if-mismatch > /dev/null 2>&1; then
     log "LZ4KD: zram force-default patch already applied, skipping."
-elif echo "$ZRAM_FORCE_DEFAULT_PATCH" | patch -p1 --fuzz=3 --dry-run --forward --no-backup-if-mismatch > /dev/null 2>&1; then
-    echo "$ZRAM_FORCE_DEFAULT_PATCH" | patch -p1 --fuzz=3 --forward --no-backup-if-mismatch \
+elif echo "$ZRAM_FORCE_DEFAULT_PATCH" | patch -p1 --batch --fuzz=3 --dry-run --forward --no-backup-if-mismatch > /dev/null 2>&1; then
+    echo "$ZRAM_FORCE_DEFAULT_PATCH" | patch -p1 --batch --fuzz=3 --forward --no-backup-if-mismatch \
         || error "LZ4KD: zram force-default patch apply failed!"
     log "LZ4KD: zram force-default patch applied ✅"
 else
@@ -126,12 +114,6 @@ CONFIGS
     log "LZ4KD: configs enabled ✅"
 fi
 
-# Sets lz4kd as the ZRAM compressor's compile-time default. This has to be a
-# separate, independently-guarded block from the CONFIG_CRYPTO_LZ4KD=y one
-# above: that block only appends on a fresh defconfig (its guard is
-# CONFIG_CRYPTO_LZ4KD not yet present), so on a rebuild where the crypto
-# lines already landed, the def-comp line would silently never get added if
-# it lived in the same block.
 if ! grep -q '^CONFIG_ZRAM_DEF_COMP="lz4kd"' "$GKI_DEFCONFIG"; then
     cat >> "$GKI_DEFCONFIG" << 'CONFIGS'
 # LZ4KD as ZRAM default compressor (Luminaire)
