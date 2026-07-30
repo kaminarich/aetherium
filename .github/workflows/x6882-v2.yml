@@ -269,6 +269,14 @@ jobs:
             export ROOT_DIR="$GITHUB_WORKSPACE"
             export LUMINAIRE_PATCH_DIR="$GITHUB_WORKSPACE/luminaire_tools"
 
+            # 🛠️ Tambahan: Deklarasikan fungsi untuk resukisu.sh / sukisu.sh
+            function log() { echo "✅ $1"; }
+            export -f log
+            function error() { echo "❌ $1"; exit 1; }
+            export -f error
+            function warn() { echo "⚠️ $1"; }
+            export -f warn
+
             echo "::group::Integrating $ROOT_MANAGER"
             
             if [ "$ROOT_MANAGER" = "KernelSU-Next" ]; then
@@ -322,7 +330,6 @@ jobs:
             fi
             cd ..
           fi
-
       - name: Patch SuSFS for 5.10
         if: inputs.ENABLE_KERNELSU_NEXT == true && inputs.ENABLE_SUSFS == true
         run: |
