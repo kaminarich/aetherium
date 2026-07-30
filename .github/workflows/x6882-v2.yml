@@ -48,9 +48,17 @@ on:
         type: boolean
         default: true
       KSU_NEXT_BRANCH:
-        description: "KernelSU-Next branch (Ignored for other forks)"
+        description: "KernelSU-Next branch"
         required: false
         default: "dev-susfs"
+      RESUKISU_BRANCH:
+        description: "ReSukiSU branch (kosongkan untuk default main)"
+        required: false
+        default: ""
+      SUKISU_BRANCH:
+        description: "SuKiSU-Ultra branch (kosongkan untuk default builtin/main)"
+        required: false
+        default: ""
       LTO_TYPE:
         description: "LTO type"
         required: false
@@ -102,7 +110,6 @@ jobs:
       ENABLE_KSU: ${{ inputs.ENABLE_KERNELSU_NEXT }}
       ROOT_MANAGER: ${{ inputs.ROOT_MANAGER }}
       ENABLE_SUSFS: ${{ inputs.ENABLE_SUSFS }}
-      KSU_BRANCH: ${{ inputs.KSU_NEXT_BRANCH || 'dev-susfs' }}
       LTO: ${{ inputs.LTO_TYPE || 'thin' }}
       ENABLE_BBRV3: ${{ inputs.ENABLE_BBRV3 }}
       ENABLE_DROIDSPACES: ${{ inputs.ENABLE_DROIDSPACES }}
@@ -149,10 +156,14 @@ jobs:
           git config --global color.ui false
 
       # ──────────────────────────────────────────────
-      # 1. Clone base kernel (known working)
+      # 1. Clone base kernel & Tools
       # ──────────────────────────────────────────────
       - name: Clone base kernel
         run: |
+          echo "::group::Cloning Luminaire Tools (from aetherium-build)"
+          git clone --depth=1 https://github.com/kaminarich/aetherium-build.git luminaire_tools
+          echo "::endgroup::"
+
           echo "::group::Cloning base kernel: $BASE_REPO ($BASE_BRANCH)"
           git clone --branch "$BASE_BRANCH" "$BASE_REPO" kernel
           echo "::endgroup::"
@@ -256,12 +267,12 @@ jobs:
             cd kernel
             export KERNEL_SRC="$PWD"
             export ROOT_DIR="$GITHUB_WORKSPACE"
-            export LUMINAIRE_PATCH_DIR="$GITHUB_WORKSPACE"
+            export LUMINAIRE_PATCH_DIR="$GITHUB_WORKSPACE/luminaire_tools"
 
             echo "::group::Integrating $ROOT_MANAGER"
             
             if [ "$ROOT_MANAGER" = "KernelSU-Next" ]; then
-              curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/$KSU_BRANCH/kernel/setup.sh" | bash -s "$KSU_BRANCH"
+              curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/${{ inputs.KSU_NEXT_BRANCH }}/kernel/setup.sh" | bash -s "${{ inputs.KSU_NEXT_BRANCH }}"
               
               DEFCONFIG="arch/arm64/configs/gki_defconfig"
               if [ -f "$DEFCONFIG" ]; then
@@ -282,21 +293,30 @@ jobs:
                 echo "✓ Root Manager configs added"
               fi
               echo "KSU_VER=$ROOT_MANAGER" >> $GITHUB_ENV
+
             elif [ "$ROOT_MANAGER" = "ReSukiSU" ]; then
-              bash "$GITHUB_WORKSPACE/kernel/android14-6.1-lts/ksu/resukisu/resukisu.sh"
+              if [ -n "${{ inputs.RESUKISU_BRANCH }}" ]; then
+                export RESUKISU_REF="${{ inputs.RESUKISU_BRANCH }}"
+              fi
+              bash "$LUMINAIRE_PATCH_DIR/kernel/android14-6.1-lts/ksu/resukisu/resukisu.sh"
+
             elif [ "$ROOT_MANAGER" = "SuKiSU-Ultra" ]; then
               export SUSFS_ENABLED="$ENABLE_SUSFS"
-              bash "$GITHUB_WORKSPACE/kernel/android14-6.1-lts/ksu/sukisu/sukisu.sh"
+              if [ -n "${{ inputs.SUKISU_BRANCH }}" ]; then
+                export SUKISU_REF="${{ inputs.SUKISU_BRANCH }}"
+                export SUKISU_BUILTIN_REF="${{ inputs.SUKISU_BRANCH }}"
+              fi
+              bash "$LUMINAIRE_PATCH_DIR/kernel/android14-6.1-lts/ksu/sukisu/sukisu.sh"
             fi
             
             echo "::endgroup::"
 
-            if [ ! -d "drivers/kernelsu" ]; then
+            if [ ! -d "drivers/kernelsu" ] && [ ! -d "KernelSU" ]; then
               echo "::error::Root Manager integration failed"
               exit 1
             fi
             
-            # Kita set KSU_VER berdasarkan ROOT_MANAGER (kecuali di-override oleh resukisu.sh)
+            # Set KSU_VER dari file script jika tersedia
             if [ -z "$RESUKISU_VERSION_DISPLAY" ] && [ -z "$SUKISU_VERSION_DISPLAY" ]; then
               echo "KSU_VER=$ROOT_MANAGER" >> $GITHUB_ENV
             fi
@@ -566,7 +586,6 @@ jobs:
 
           echo "Sending ZIP to Telegram..."
 
-          # Jika ReSukiSU/SuKiSU mengembalikan versi display di env, pakai itu!
           if [ -n "$RESUKISU_VERSION_DISPLAY" ]; then
             FINAL_KSU_VER="ReSukiSU $RESUKISU_VERSION_DISPLAY"
           elif [ -n "$SUKISU_VERSION_DISPLAY" ]; then
@@ -602,7 +621,6 @@ jobs:
 
           echo "Build Failed! Sending log to Telegram..."
 
-          # Extract the last 150 lines of the build log and any specific errors
           ERROR_LOG="error_log.txt"
           if [ -f kernel/build.log ]; then
             echo "=== LAST 150 LINES OF LOG ===" > $ERROR_LOG
