@@ -4,9 +4,12 @@
 # ✨ X6882 KSU Spoof Addon (Prank Edition 😈)
 # ======================================================
 
-KSU_DISPATCH="drivers/kernelsu/supercall/dispatch.c"
-
-if [ ! -f "$KSU_DISPATCH" ]; then
+# Cek lokasi instalasi (Next biasanya di drivers/kernelsu, ReSukiSU di KernelSU/kernel)
+if [ -f "drivers/kernelsu/supercall/dispatch.c" ]; then
+    KSU_DISPATCH="drivers/kernelsu/supercall/dispatch.c"
+elif [ -f "KernelSU/kernel/supercall/dispatch.c" ]; then
+    KSU_DISPATCH="KernelSU/kernel/supercall/dispatch.c"
+else
     echo "⚠️ KernelSU is not integrated or dispatch.c not found! Spoofing skipped."
     exit 0
 fi
@@ -17,7 +20,7 @@ if ! grep -qE "do_get_version_tag|do_ksunext_compat_version_tag" "$KSU_DISPATCH"
     exit 0
 fi
 
-echo "✅ Menginjeksi Deteksi Pintar X6882 ke $ROOT_MANAGER..."
+echo "✅ Menginjeksi Deteksi Pintar X6882 ke Root Manager..."
 
 cat << 'EOF' > patch_ksu.awk
 /static int do_get_version_tag|static int do_ksunext_compat_version_tag/ {
