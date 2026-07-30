@@ -24,6 +24,7 @@ echo "✅ Menginjeksi Deteksi Pintar X6882 ke Root Manager..."
 
 cat << 'EOF' > patch_ksu.awk
 /static int do_get_version_tag|static int do_ksunext_compat_version_tag/ {
+    print "#include <linux/of.h>"
     print "extern char *saved_command_line;"
     print "static bool ksu_x6882_checked = false;"
     print "static bool ksu_is_x6882 = false;"
@@ -70,7 +71,7 @@ cat << 'EOF' > patch_ksu.awk
         $0 ~ /strlcpy\(cmd\.tag, KSU_VERSION_FULL/) {
         print "    ksu_check_x6882();"
         print "    if (ksu_is_x6882) {"
-        print "        strscpy(cmd.tag, \"X6882-Gayming\", sizeof(cmd.tag));"
+        print "        strscpy(cmd.tag, \"X6882-Gaymink\", sizeof(cmd.tag));"
         print "    } else {"
         print $0
         print "    }"
