@@ -176,13 +176,25 @@ jobs:
           sed -i 's/u64 clidr;/u64 clidr = 0;/g' arch/arm64/kvm/sys_regs.c
           echo "::endgroup::"
 
-          echo "::group::Removing KSU inline hooks by restoring clean AOSP files"
-          # Kita kembalikan 5 file yang tercemar ini menjadi bersih 100% dari sumber murni Google AOSP.
-          git remote add aosp https://android.googlesource.com/kernel/common || true
-          git fetch aosp android12-5.10 --depth=1 || true
-          git checkout FETCH_HEAD -- fs/read_write.c fs/open.c fs/stat.c fs/exec.c drivers/input/input.c || {
-            echo "::warning::Gagal memulihkan dari AOSP, mengabaikan langkah ini..."
-          }
+          echo "::group::Fixing legacy KSU linker errors via Dummy Stubs"
+          # Trik jitu: Buat file C berisi fungsi kosong untuk memuaskan (menipu) Linker 
+          # agar tidak kena "undefined symbol", tanpa merusak source code asli mahiru.
+          cat << 'EOF' > fs/ksu_dummy.c
+          #pragma clang diagnostic ignored "-Wstrict-prototypes"
+          #pragma clang diagnostic ignored "-Wmissing-prototypes"
+          int ksu_handle_faccessat() { return 0; }
+          int ksu_vfs_read_hook() { return 0; }
+          int ksu_handle_sys_read() { return 0; }
+          int ksu_handle_stat() { return 0; }
+          int ksu_execveat_hook() { return 0; }
+          int ksu_handle_execve_ksud() { return 0; }
+          int ksu_handle_execve_sucompat() { return 0; }
+          int ksu_input_hook() { return 0; }
+          int ksu_vfs_statx_hook() { return 0; }
+          int ksu_vfs_faccessat_hook() { return 0; }
+          EOF
+          echo "obj-y += ksu_dummy.o" >> fs/Makefile
+          echo "CFLAGS_ksu_dummy.o := -fno-lto -Wno-error" >> fs/Makefile
           echo "::endgroup::"
 
       # ──────────────────────────────────────────────
