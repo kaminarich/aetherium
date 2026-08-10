@@ -1,4 +1,4 @@
-name: Custom Build 5.10 Kernel + addon (Neutron Clang)
+name: Custom Build 5.10 Kernel + addon (Clang 12)
 
 on:
   workflow_dispatch:
@@ -96,7 +96,7 @@ on:
 
 jobs:
   build:
-    name: "${{ inputs.KERNEL_NAME }} | 5.10 | ${{ inputs.UPSTREAM_TAG || 'no-merge' }} | Neutron"
+    name: "${{ inputs.KERNEL_NAME }} | 5.10 | ${{ inputs.UPSTREAM_TAG || 'no-merge' }} | Clang 12"
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -429,17 +429,15 @@ jobs:
       # ──────────────────────────────────────────────
       # 5. Download toolchain & Build
       # ──────────────────────────────────────────────
-      - name: Download Neutron Clang toolchain
+      - name: Download Clang 12 (AOSP r416183b)
         run: |
-          echo "::group::Downloading Neutron Clang (via antman)"
-          git clone https://github.com/Neutron-Toolchains/antman --depth=1 "$GITHUB_WORKSPACE/toolchain"
-          cd "$GITHUB_WORKSPACE/toolchain"
-          ./antman -S
+          echo "::group::Downloading Clang 12"
+          git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b.git --depth=1 "$GITHUB_WORKSPACE/toolchain"
           echo "::endgroup::"
           echo "Clang version:"
           "$GITHUB_WORKSPACE/toolchain/bin/clang" --version | head -2
 
-          echo "CLANG_VER=Neutron Clang" >> $GITHUB_ENV
+          echo "CLANG_VER=Clang 12 (AOSP r416183b)" >> $GITHUB_ENV
 
       - name: Build kernel
         run: |
@@ -530,7 +528,7 @@ jobs:
           fi
 
           UPSTREAM_LABEL="${UPSTREAM_TAG:-base-only}"
-          BUILD_NAME="${KERNEL_NAME}-5.10-${UPSTREAM_LABEL}${KSU_TAG}-Neutron"
+          BUILD_NAME="${KERNEL_NAME}-5.10-${UPSTREAM_LABEL}${KSU_TAG}-Clang12"
           DATE_TAG=$(date +%Y%m%d)
           ZIP_NAME="${BUILD_NAME}-${DATE_TAG}-${GITHUB_RUN_NUMBER}"
 
