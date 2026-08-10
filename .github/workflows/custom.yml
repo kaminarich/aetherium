@@ -176,15 +176,13 @@ jobs:
           sed -i 's/u64 clidr;/u64 clidr = 0;/g' arch/arm64/kvm/sys_regs.c
           echo "::endgroup::"
 
-          echo "::group::Cleaning up legacy KSU inline hooks from base kernel"
-          sed -i '/ksu_handle_faccessat/d' fs/open.c || true
-          sed -i '/ksu_vfs_read_hook/d' fs/read_write.c || true
-          sed -i '/ksu_handle_sys_read/d' fs/read_write.c || true
-          sed -i '/ksu_handle_stat/d' fs/stat.c || true
-          sed -i '/ksu_execveat_hook/d' fs/exec.c || true
-          sed -i '/ksu_handle_execve_ksud/d' fs/exec.c || true
-          sed -i '/ksu_handle_execve_sucompat/d' fs/exec.c || true
-          sed -i '/ksu_input_hook/d' drivers/input/input.c || true
+          echo "::group::Removing KSU inline hooks by restoring clean AOSP files"
+          # Kita kembalikan 5 file yang tercemar ini menjadi bersih 100% dari sumber murni Google AOSP.
+          git remote add aosp https://android.googlesource.com/kernel/common || true
+          git fetch aosp android12-5.10 --depth=1 || true
+          git checkout FETCH_HEAD -- fs/read_write.c fs/open.c fs/stat.c fs/exec.c drivers/input/input.c || {
+            echo "::warning::Gagal memulihkan dari AOSP, mengabaikan langkah ini..."
+          }
           echo "::endgroup::"
 
       # ──────────────────────────────────────────────
@@ -196,7 +194,7 @@ jobs:
           cd kernel
 
           echo "::group::Adding Google upstream remote"
-          git remote add google https://android.googlesource.com/kernel/common
+          git remote add google https://android.googlesource.com/kernel/common || true
           echo "::endgroup::"
 
           echo "::group::Fetching upstream tag: $UPSTREAM_TAG"
