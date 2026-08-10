@@ -654,4 +654,3 @@ jobs:
             -F document=@"$ERROR_LOG" \
             -F caption="$CAPTION" \
             -F parse_mode="HTML"
-```
