@@ -433,9 +433,9 @@ jobs:
       - name: Download LLVM 12.0.1
         run: |
           echo "::group::Downloading Official LLVM 12.0.1"
-          wget -q https://github.com/llvm/llvm-project/releases/download/llvmorg-12.0.1/clang+llvm-12.0.1-x86_64-linux-gnu-ubuntu-16.04.tar.xz
-          tar -xf clang+llvm-12.0.1-x86_64-linux-gnu-ubuntu-16.04.tar.xz
-          mv clang+llvm-12.0.1-x86_64-linux-gnu-ubuntu-16.04 "$GITHUB_WORKSPACE/toolchain"
+          mkdir -p "$GITHUB_WORKSPACE/toolchain"
+          wget -qO clang.tar.xz https://github.com/llvm/llvm-project/releases/download/llvmorg-12.0.1/clang+llvm-12.0.1-x86_64-linux-gnu-ubuntu-16.04.tar.xz
+          tar -xf clang.tar.xz -C "$GITHUB_WORKSPACE/toolchain" --strip-components=1
           echo "::endgroup::"
           echo "Clang version:"
           "$GITHUB_WORKSPACE/toolchain/bin/clang" --version | head -2
