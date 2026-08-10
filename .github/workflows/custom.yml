@@ -176,6 +176,17 @@ jobs:
           sed -i 's/u64 clidr;/u64 clidr = 0;/g' arch/arm64/kvm/sys_regs.c
           echo "::endgroup::"
 
+          echo "::group::Cleaning up legacy KSU inline hooks from base kernel"
+          sed -i '/ksu_handle_faccessat/d' fs/open.c || true
+          sed -i '/ksu_vfs_read_hook/d' fs/read_write.c || true
+          sed -i '/ksu_handle_sys_read/d' fs/read_write.c || true
+          sed -i '/ksu_handle_stat/d' fs/stat.c || true
+          sed -i '/ksu_execveat_hook/d' fs/exec.c || true
+          sed -i '/ksu_handle_execve_ksud/d' fs/exec.c || true
+          sed -i '/ksu_handle_execve_sucompat/d' fs/exec.c || true
+          sed -i '/ksu_input_hook/d' drivers/input/input.c || true
+          echo "::endgroup::"
+
       # ──────────────────────────────────────────────
       # 2. Merge upstream Google tag
       # ──────────────────────────────────────────────
