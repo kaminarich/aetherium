@@ -46,7 +46,7 @@ on:
         description: "Patch SuSFS for KernelSU"
         required: true
         type: boolean
-        default: true
+        default: false
       KSU_NEXT_BRANCH:
         description: "KernelSU-Next branch"
         required: false
@@ -170,6 +170,10 @@ jobs:
           cd kernel
           echo "Base HEAD: $(git log --oneline -1)"
           echo "Total commits: $(git rev-list --count HEAD)"
+          
+          echo "::group::Fixing Clang uninitialized-const-pointer error"
+          sed -i 's/u64 clidr;/u64 clidr = 0;/g' arch/arm64/kvm/sys_regs.c
+          echo "::endgroup::"
 
       # ──────────────────────────────────────────────
       # 2. Merge upstream Google tag
@@ -650,3 +654,4 @@ jobs:
             -F document=@"$ERROR_LOG" \
             -F caption="$CAPTION" \
             -F parse_mode="HTML"
+```
