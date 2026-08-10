@@ -1,4 +1,4 @@
-name: Custom Build 5.10 Kernel + addon (Clang 12)
+name: Custom Build 5.10 Kernel + addon (LLVM 12.0.1)
 
 on:
   workflow_dispatch:
@@ -96,7 +96,7 @@ on:
 
 jobs:
   build:
-    name: "${{ inputs.KERNEL_NAME }} | 5.10 | ${{ inputs.UPSTREAM_TAG || 'no-merge' }} | Clang 12"
+    name: "${{ inputs.KERNEL_NAME }} | 5.10 | ${{ inputs.UPSTREAM_TAG || 'no-merge' }} | LLVM 12.0.1"
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -137,7 +137,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             bc bison build-essential ccache curl flex git gnupg gperf \
             libelf-dev libncurses5-dev libssl-dev lz4 python3 \
-            python-is-python3 rsync zip unzip jq zstd
+            python-is-python3 rsync zip unzip jq zstd \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
       - name: Setup swap
         run: |
@@ -429,15 +430,17 @@ jobs:
       # ──────────────────────────────────────────────
       # 5. Download toolchain & Build
       # ──────────────────────────────────────────────
-      - name: Download Clang 12 (AOSP r416183b)
+      - name: Download LLVM 12.0.1
         run: |
-          echo "::group::Downloading Clang 12"
-          git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b.git --depth=1 "$GITHUB_WORKSPACE/toolchain"
+          echo "::group::Downloading Official LLVM 12.0.1"
+          wget -q https://github.com/llvm/llvm-project/releases/download/llvmorg-12.0.1/clang+llvm-12.0.1-x86_64-linux-gnu-ubuntu-16.04.tar.xz
+          tar -xf clang+llvm-12.0.1-x86_64-linux-gnu-ubuntu-16.04.tar.xz
+          mv clang+llvm-12.0.1-x86_64-linux-gnu-ubuntu-16.04 "$GITHUB_WORKSPACE/toolchain"
           echo "::endgroup::"
           echo "Clang version:"
           "$GITHUB_WORKSPACE/toolchain/bin/clang" --version | head -2
 
-          echo "CLANG_VER=Clang 12 (AOSP r416183b)" >> $GITHUB_ENV
+          echo "CLANG_VER=LLVM 12.0.1" >> $GITHUB_ENV
 
       - name: Build kernel
         run: |
@@ -528,7 +531,7 @@ jobs:
           fi
 
           UPSTREAM_LABEL="${UPSTREAM_TAG:-base-only}"
-          BUILD_NAME="${KERNEL_NAME}-5.10-${UPSTREAM_LABEL}${KSU_TAG}-Clang12"
+          BUILD_NAME="${KERNEL_NAME}-5.10-${UPSTREAM_LABEL}${KSU_TAG}-LLVM12"
           DATE_TAG=$(date +%Y%m%d)
           ZIP_NAME="${BUILD_NAME}-${DATE_TAG}-${GITHUB_RUN_NUMBER}"
 
