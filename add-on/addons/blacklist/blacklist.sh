@@ -17,13 +17,13 @@
 #   ReSukiSU (KernelSU/kernel/...):
 #     - do_get_full_version fills cmd.version_full from the
 #       KSU_VERSION_FULL macro (the macro this build rebrands to
-#       "$(KSU_TAG_NAME) Aetherium"). Spoof the copy in dispatch.c
-#       and flip the tag name appended by the branding Kbuild rule,
-#       so the app reads "<tag> Gay50" on X6882 and the normal
+#       "$(KSU_TAG_NAME) Aetherium"). On X6882 replace the
+#       "Aetherium" suffix with "X6882-Gaymink", so the manager
+#       app shows "<tag> X6882-Gaymink" on X6882 and
 #       "<tag> Aetherium" everywhere else.
 # ======================================================
 
-spoof_suffix="Gay50"
+spoof_string="X6882-Gaymink"
 
 log() { echo "✅ $1"; }
 warn() { echo "⚠️ $1"; }
@@ -119,7 +119,7 @@ fi
 if grep -q "do_get_full_version" "$KSU_DISPATCH"; then
     log "Injecting X6882 detection (full-version path) into ${KSU_DISPATCH}..."
 
-    python3 - "$KSU_DISPATCH" "$spoof_suffix" << 'PYEOF'
+    python3 - "$KSU_DISPATCH" "$spoof_string" << 'PYEOF'
 import re
 import sys
 
