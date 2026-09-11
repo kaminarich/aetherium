@@ -453,6 +453,11 @@ jobs:
           export LLVM_IAS=1
           export CROSS_COMPILE=aarch64-linux-gnu-
 
+          # Stamp the version banner (Linux version ... user@host ...)
+          # with Aetherium builder identity instead of the runner default.
+          export KBUILD_BUILD_USER="aetherium"
+          export KBUILD_BUILD_HOST="kaminarich"
+
           echo "::group::Configuring (gki_defconfig)"
           make O=out gki_defconfig
           echo "::endgroup::"
