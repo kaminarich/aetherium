@@ -8,13 +8,13 @@ on:
         required: true
         default: "Aetherium"
       BASE_REPO:
-        description: "Base kernel repo (e.g. ramabondanp or android.googlesource.com/kernel/common.git)"
+        description: "Base kernel repo (kaminarich/GKI-Kernel or any android12-5.10 GKI source)"
         required: true
-        default: "https://github.com/ramabondanp/android_kernel_common-5.10.git"
+        default: "https://github.com/kaminarich/GKI-Kernel.git"
       BASE_BRANCH:
         description: "Base repo branch"
         required: true
-        default: "android12-5.10"
+        default: "aetherium-x6882"
       UPSTREAM_TAG:
         description: "Google upstream tag to merge (leave empty to skip merge)"
         required: false
@@ -104,7 +104,7 @@ jobs:
     env:
       KERNEL_NAME: ${{ inputs.KERNEL_NAME || 'Aetherium' }}
       BASE_REPO: ${{ inputs.BASE_REPO }}
-      BASE_BRANCH: ${{ inputs.BASE_BRANCH || 'android12-5.10' }}
+      BASE_BRANCH: ${{ inputs.BASE_BRANCH || 'aetherium-x6882' }}
       UPSTREAM_TAG: ${{ inputs.UPSTREAM_TAG }}
       MERGE_STRATEGY: ${{ inputs.MERGE_STRATEGY || 'theirs-auto' }}
       ENABLE_KSU: ${{ inputs.ENABLE_KERNELSU_NEXT }}
@@ -369,6 +369,11 @@ jobs:
           fi
 
           echo "SUSFS_STATUS=Enabled" >> $GITHUB_ENV
+
+      - name: Fix susfs statfs forward declarations
+        if: inputs.ENABLE_KERNELSU_NEXT == true && inputs.ENABLE_SUSFS == true
+        run: bash "$GITHUB_WORKSPACE/scripts/fix-susfs-statfs.sh"
+        working-directory: kernel
 
       # ──────────────────────────────────────────────
       # X. Apply Optimization Addons
