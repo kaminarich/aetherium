@@ -3,37 +3,34 @@
 # ======================================================
 # X6882 KSU Version Spoof Addon (Prank Edition)
 # ======================================================
-# Spoofs the root manager's reported driver version string (what the
-# manager app shows as "Versi driver kernel" / "Kernel driver version")
-# but only on boards whose identity contains "X6882" (for example
-# "Infinix X6882" or "Infinix-X6882"). The kernel name and the version
-# banner are untouched.
+# Rebrands the version string the root manager reports to its app
+# ("Versi driver kernel" / "Kernel driver version"), but only on boards
+# whose identity contains "X6882" (for example "Infinix X6882" or
+# "Infinix-X6882"). The kernel name and the version banner are not
+# touched.
 #
-# Two reporting layouts are handled:
+# Copy sites handled (whichever the integrated manager provides):
+#   - do_get_full_version()            -> cmd.version_full
+#   - do_get_version_tag()             -> cmd.tag
+#   - do_ksunext_compat_version_tag()  -> cmd.tag   (KSU-Next compat
+#                                         shim added for ReSukiSU)
 #
-#   KernelSU-Next / SuKiSU-Ultra (drivers/kernelsu/...):
-#     do_get_version_tag() / do_ksunext_compat_version_tag() copy
-#     KERNEL_SU_VERSION_TAG or KSU_VERSION_FULL into cmd.tag.
-#
-#   ReSukiSU (KernelSU/kernel/...):
-#     do_get_full_version() copies the KSU_VERSION_FULL macro (which
-#     this build rebrands to "$(KSU_TAG_NAME) Aetherium") into
-#     cmd.version_full.
-#
-# On a matching board the reported string becomes
-# "<tag> X6882-Gaymink" (ReSukiSU) or "X6882-Gaymink" (tag layout);
-# every other device keeps the normal branded string.
+# Each site keeps the release tag and only swaps the branding suffix,
+# so the app shows:
+#   X6882      -> "v4.2.0-rc1 X6882-Gaymink"
+#   any other  -> "v4.2.0-rc1 Aetherium"
 #
 # Detection sources (case-insensitive substring match on "X6882"):
 #   - kernel command line (saved_command_line)
 #   - device tree root: model, compatible
 #   - device tree /firmware/android: model, device, brand
 #
-# The result is logged as "ksu_x6882:" lines in dmesg so the match can
-# be verified on device.
+# Every inspected value and the final verdict are logged as
+# "ksu_x6882:" lines in dmesg, so a miss can be diagnosed on device.
 # ======================================================
 
 spoof_string="X6882-Gaymink"
+brand_string="Aetherium"
 
 log() { echo "✅ $1"; }
 warn() { echo "⚠️ $1"; }
@@ -48,18 +45,18 @@ else
     exit 0
 fi
 
-python3 - "$KSU_DISPATCH" "$spoof_string" << 'PYEOF'
+python3 - "$KSU_DISPATCH" "$spoof_string" "$brand_string" << 'PYEOF'
 import re
 import sys
 
-path, spoof = sys.argv[1], sys.argv[2]
+path, spoof, brand = sys.argv[1], sys.argv[2], sys.argv[3]
 src = open(path).read()
 
 if "ksu_x6882_checked" in src:
     print("X6882 prank already applied, skipping")
     sys.exit(0)
 
-DETECTOR = """#include <linux/of.h>
+HELPERS = """#include <linux/of.h>
 #include <linux/string.h>
 
 extern char *saved_command_line;
@@ -144,86 +141,65 @@ done:
     pr_info("ksu_x6882: board is%s X6882\\n", ksu_is_x6882 ? "" : " not");
 }
 
+/* Copy @orig into @dst, swapping the branding suffix on X6882 boards. */
+static void ksu_x6882_brand(char *dst, size_t len, const char *orig)
+{
+    const char *suffix;
+    size_t head;
+
+    ksu_check_x6882();
+
+    if (!ksu_is_x6882) {
+        strscpy(dst, orig, len);
+        return;
+    }
+
+    suffix = strstr(orig, "__KSU_BRAND__");
+    if (suffix) {
+        head = suffix - orig;
+        if (head >= len)
+            head = len - 1;
+        strscpy(dst, orig, head + 1);
+    } else {
+        strscpy(dst, orig, len);
+        strlcat(dst, " ", len);
+    }
+    strlcat(dst, "__KSU_SPOOF__", len);
+}
+
 """
+HELPERS = HELPERS.replace("__KSU_BRAND__", brand).replace("__KSU_SPOOF__", spoof)
 
-TAG_ANCHORS = ("static int do_get_version_tag",
-               "static int do_ksunext_compat_version_tag")
-FULL_ANCHOR = "static int do_get_full_version(void __user *arg)"
+ANCHORS = ("static int do_get_version_tag",
+           "static int do_ksunext_compat_version_tag",
+           "static int do_get_full_version")
 
-anchors = [a for a in TAG_ANCHORS + (FULL_ANCHOR,) if a in src]
-if not anchors:
+present = [a for a in ANCHORS if a in src]
+if not present:
     print("no known version reporting routine found, skipping")
     sys.exit(0)
 
-first = min(anchors, key=src.index)
-src = src.replace(first, DETECTOR + first, 1)
+src = src.replace(min(present, key=src.index), HELPERS + min(present, key=src.index), 1)
 
-patched = []
-
-# Tag layout: swap the whole tag on X6882.
-tag_copy = re.compile(
-    r"^([ \t]*)(str[sl]cpy\(cmd\.tag, (?:KERNEL_SU_VERSION_TAG|KSU_VERSION_FULL)[^\n]*)$",
+# Route every version copy through the branding helper.
+copy_site = re.compile(
+    r"^([ \t]*)str[sl]cpy\((cmd\.(?:tag|version_full)), "
+    r"(KSU_VERSION_FULL|KERNEL_SU_VERSION_TAG), sizeof\(\2\)\);[ \t]*$",
     re.M)
 
-def tag_sub(m):
-    ind, stmt = m.group(1), m.group(2)
-    return (f"{ind}ksu_check_x6882();\n"
-            f"{ind}if (ksu_is_x6882) {{\n"
-            f"{ind}    strscpy(cmd.tag, \"{spoof}\", sizeof(cmd.tag));\n"
-            f"{ind}}} else {{\n"
-            f"{ind}    {stmt}\n"
-            f"{ind}}}")
+def sub(m):
+    ind, dst, macro = m.group(1), m.group(2), m.group(3)
+    return f"{ind}ksu_x6882_brand({dst}, sizeof({dst}), {macro});"
 
-src, n = tag_copy.subn(tag_sub, src)
-if n:
-    patched.append(f"tag path ({n} site(s))")
-
-# Full-version layout: keep the release tag, swap the branding suffix.
-if FULL_ANCHOR in src:
-    body = re.search(
-        r"(static int do_get_full_version\(void __user \*arg\)\s*\{.*?)"
-        r"(    if \(copy_to_user\(arg, &cmd, sizeof\(cmd\)\)\))",
-        src, re.S)
-    if not body:
-        print("ERROR: do_get_full_version body not recognised", file=sys.stderr)
-        sys.exit(1)
-
-    spoof_block = (
-        "    ksu_check_x6882();\n"
-        "    if (ksu_is_x6882) {\n"
-        "        char spoofed[sizeof(cmd.version_full)];\n"
-        "        const char *orig = KSU_VERSION_FULL;\n"
-        "        const char *suffix = strstr(orig, \"Aetherium\");\n"
-        "\n"
-        "        if (suffix) {\n"
-        "            size_t head = suffix - orig;\n"
-        "\n"
-        "            if (head >= sizeof(spoofed))\n"
-        "                head = sizeof(spoofed) - 1;\n"
-        "            strscpy(spoofed, orig, head + 1);\n"
-        "        } else {\n"
-        "            strscpy(spoofed, orig, sizeof(spoofed));\n"
-        "            strlcat(spoofed, \" \", sizeof(spoofed));\n"
-        "        }\n"
-        f"        strlcat(spoofed, \"{spoof}\", sizeof(spoofed));\n"
-        "#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 13, 0)\n"
-        "        strscpy(cmd.version_full, spoofed, sizeof(cmd.version_full));\n"
-        "#else\n"
-        "        strlcpy(cmd.version_full, spoofed, sizeof(cmd.version_full));\n"
-        "#endif\n"
-        "    }\n\n")
-
-    src = src[:body.end(1)] + spoof_block + src[body.end(1):]
-    patched.append("full-version path")
-
-if not patched:
-    print("ERROR: detector inserted but no copy site patched", file=sys.stderr)
+src, n = copy_site.subn(sub, src)
+if not n:
+    print("ERROR: no version copy site matched", file=sys.stderr)
     sys.exit(1)
 
 open(path, "w").write(src)
-print("X6882 spoof injected: " + ", ".join(patched))
+print(f"X6882 spoof injected at {n} copy site(s)")
 PYEOF
 
 [ $? -eq 0 ] || error "X6882 spoof injection failed!"
 
-log "Prank X6882 ready (${spoof_string}) in ${KSU_DISPATCH}"
+log "Prank X6882 ready (${brand_string} -> ${spoof_string}) in ${KSU_DISPATCH}"
