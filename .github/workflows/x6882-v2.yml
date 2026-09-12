@@ -1,4 +1,4 @@
-name: V2 X6882 Build 5.10 Kernel + addon (Neutron Clang)
+name: Aetherium Latest
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ on:
       BASE_BRANCH:
         description: "Base repo branch"
         required: true
-        default: "aetherium-x6882"
+        default: "aetherium"
       UPSTREAM_TAG:
         description: "Google upstream tag to merge (leave empty to skip merge)"
         required: false
@@ -104,7 +104,7 @@ jobs:
     env:
       KERNEL_NAME: ${{ inputs.KERNEL_NAME || 'Aetherium' }}
       BASE_REPO: ${{ inputs.BASE_REPO }}
-      BASE_BRANCH: ${{ inputs.BASE_BRANCH || 'aetherium-x6882' }}
+      BASE_BRANCH: ${{ inputs.BASE_BRANCH || 'aetherium' }}
       UPSTREAM_TAG: ${{ inputs.UPSTREAM_TAG }}
       MERGE_STRATEGY: ${{ inputs.MERGE_STRATEGY || 'theirs-auto' }}
       ENABLE_KSU: ${{ inputs.ENABLE_KERNELSU_NEXT }}
